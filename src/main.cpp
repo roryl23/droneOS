@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <onnx.h>
 
 // function declarations
 int myFunction(int, int);
