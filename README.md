@@ -1,7 +1,12 @@
 # droneOS
 
-pretty simple. this is an optimized operating system for running drones.
+an optimized operating system for running drones on the Raspberry PI platform
+
+## usage
+
+* `bash install.sh && bash build.sh`
 
 ## resources
 
-* https://github.com/arduino/nina-fw
+* https://wiki.osdev.org/Raspberry_Pi_Bare_Bones
+* https://github.com/xboot/libonnx
