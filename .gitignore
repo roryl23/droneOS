@@ -4,4 +4,6 @@
 .vscode/launch.json
 .vscode/ipch
 
-lib/
+lib/ArduinoCore-avr
+lib/Servo
+lib/libonnx
