@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 
 # install build dependencies
-sudo apt install -y \
-  ubuntu-dev-tools \
-  cmake \
-  curl \
-  qemu-system-arm \
-  binutils-arm-none-eabi \
-  gcc-arm-none-eabi
+sudo apt install \
+  bc \
+  bison \
+  flex \
+  libssl-dev \
+  make \
+  libc6-dev \
+  libncurses5-dev \
+  crossbuild-essential-arm64 \
+  crossbuild-essential-armhf

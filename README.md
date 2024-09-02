@@ -1,17 +1,19 @@
 # droneOS
 
-an optimized application for running drones on the Raspberry PI platform.
-
-NOTE: I'm going to halt development on this in favor of waiting for the real time
-      patch to be merged to the mainline Linux kernel:
-* https://lwn.net/current/Announcements
+an optimized system for running drones on the Raspberry PI platform.
 
 ## usage
 
 * `bash install.sh && bash build.sh`
 
+## notes
+
+* This won't work quite correctly until the real time patch is merged to the mainline Linux kernel:
+  * https://wiki.linuxfoundation.org/realtime/start
+  * Currently we're manually patching the kernel
+
 ## resources
 
-* https://wiki.osdev.org/Raspberry_Pi_Bare_Bones
-* https://github.com/s-matyukevich/raspberry-pi-os?tab=readme-ov-file
+* https://www.raspberrypi.com/documentation/computers/linux_kernel.html
+  * https://cdn.kernel.org/pub/linux/kernel/projects/rt/6.6/
 * https://github.com/xboot/libonnx

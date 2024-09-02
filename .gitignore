@@ -5,4 +5,7 @@ lib/libnc
 lib/tcc
 lib/libonnx
 
+build/
+bin/
 *.o
+*.elf
