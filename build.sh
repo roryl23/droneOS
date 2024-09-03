@@ -63,14 +63,14 @@ EOF
   sudo cp arch/arm64/boot/dts/overlays/*.dtb* mnt/rpi_boot/overlays/ && \
   sudo cp arch/arm64/boot/dts/overlays/README mnt/rpi_boot/overlays/
   # cleanup
-  sudo umount /dev/"${SD_CARD_BOOT}" && \
+  sudo umount /dev/"${SD_CARD_BOOT}"
   sudo umount /dev/"${SD_CARD_ROOT}"
   cd $PROJECT_DIR
 fi
 
 # install source libraries
-#cd lib && \
-#bash install.sh && \
-#cd $PROJECT_DIR
+cd lib && \
+bash install.sh && \
+cd $PROJECT_DIR
 
 # build droneOS
