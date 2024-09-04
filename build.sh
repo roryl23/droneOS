@@ -18,7 +18,7 @@ if ! [ -d "build/firmware" ]; then
   cd $PROJECT_DIR
 fi
 
-# get kernel source
+# get kernel source and configure
 if ! [ -d "build/linux" ]; then
   mkdir -p build && \
   cd build && \
@@ -52,15 +52,18 @@ mkpart primary ext4 65MiB 100%
 EOF
   sudo mkfs.vfat -F 32 /dev/"${SD_CARD_BOOT}" && \
   sudo mkfs.ext4 -F /dev/"${SD_CARD_ROOT}" && \
-  # build kernel and install to sd card
   cd build/linux && \
-  make KERNEL=kernel8 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig
-  make -j6 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image modules dtbs
+  make KERNEL=kernel8 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig && \
+  # configure
+  cp $PROJECT_DIR/config/.config . && \
+  #make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- menuconfig && \
+  # build
+  make -j8 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image modules dtbs && \
   mkdir -p mnt/rpi_boot
   mkdir -p mnt/rpi_root
   sudo mount /dev/"${SD_CARD_BOOT}" mnt/rpi_boot && \
   sudo mount /dev/"${SD_CARD_ROOT}" mnt/rpi_root && \
-  sudo env PATH=$PATH make -j6 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH=mnt/rpi_root modules_install
+  sudo env PATH=$PATH make -j8 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH=mnt/rpi_root modules_install
   if [ -f "mnt/rpi_boot/$KERNEL.img" ]; then
     sudo cp mnt/rpi_boot/"$KERNEL".img mnt/rpi_boot/"$KERNEL"-backup.img
   fi
