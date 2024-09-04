@@ -11,6 +11,13 @@ SD_CARD_BOOT="${SD_CARD}1"
 SD_CARD_ROOT="${SD_CARD}2"
 KERNEL=kernel8
 
+# get raspberry pi firmware
+if ! [ -d "build/firmware" ]; then
+  cd build && \
+  git clone --depth=1 git@github.com:raspberrypi/firmware.git
+  cd $PROJECT_DIR
+fi
+
 # get kernel source
 if ! [ -d "build/linux" ]; then
   mkdir -p build && \
@@ -61,7 +68,11 @@ EOF
   sudo cp arch/arm64/boot/dts/broadcom/*.dtb mnt/rpi_boot/ && \
   sudo mkdir -p mnt/rpi_boot/overlays/ && \
   sudo cp arch/arm64/boot/dts/overlays/*.dtb* mnt/rpi_boot/overlays/ && \
-  sudo cp arch/arm64/boot/dts/overlays/README mnt/rpi_boot/overlays/
+  sudo cp arch/arm64/boot/dts/overlays/README mnt/rpi_boot/overlays/ && \
+  # copy raspberry pi firmware
+  sudo cp $PROJECT_DIR/build/firmware/boot/start*.elf mnt/rpi_boot/ && \
+  sudo cp $PROJECT_DIR/build/firmware/boot/fixup*.dat mnt/rpi_boot/ && \
+  sudo cp $PROJECT_DIR/build/firmware/boot/bootcode.bin mnt/rpi_boot/bootcode.bin
   # cleanup
   sudo umount /dev/"${SD_CARD_BOOT}"
   sudo umount /dev/"${SD_CARD_ROOT}"
