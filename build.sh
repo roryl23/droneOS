@@ -75,13 +75,13 @@ fi
 if [ -d "build/linux" ]; then
   cd build/linux && \
   # configure
-  cp "$PROJECT_DIR"/config/.config . && \
+  cp "$PROJECT_DIR"/configs/.config . && \
   mkdir -p mnt/rpi_boot && \
   mkdir -p mnt/rpi_root && \
   sudo mount /dev/"${SD_CARD_BOOT}" mnt/rpi_boot && \
   sudo mount /dev/"${SD_CARD_ROOT}" mnt/rpi_root && \
   sudo mkdir -p mnt/rpi_boot/overlays/ && \
-  sudo cp "$PROJECT_DIR"/config/config-"${KERNEL}".txt mnt/rpi_boot
+  sudo cp "$PROJECT_DIR"/configs/config-"${KERNEL}".txt mnt/rpi_boot
   # set up user to avoid booting into userconfig on first boot
   PASSWORD_ENCRYPTED=$(echo "$PASSWORD" | openssl passwd -6 -stdin)
   echo "${USER}:${PASSWORD_ENCRYPTED}" | tee mnt/rpi_boot/userconf.txt
