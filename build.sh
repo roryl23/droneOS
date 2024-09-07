@@ -24,14 +24,6 @@ RPI_LINUX_BRANCH=rpi-6.6.y
 SD_CARD_BOOT="${SD_CARD}1"
 SD_CARD_ROOT="${SD_CARD}2"
 
-# don't need firmware if we're using provided images
-# get raspberry pi firmware
-#if ! [ -d "build/firmware" ]; then
-#  cd build && \
-#  git clone --depth=1 git@github.com:raspberrypi/firmware.git
-#  cd $PROJECT_DIR
-#fi
-
 # get kernel source and configure
 if ! [ -d "build/linux" ]; then
   mkdir -p build && \
@@ -174,12 +166,6 @@ if [ -d "build/linux" ]; then
     sudo cp arch/arm64/boot/dts/overlays/*.dtb* mnt/rpi_boot/overlays/ && \
     sudo cp arch/arm64/boot/dts/overlays/README mnt/rpi_boot/overlays/
   fi
-
-  # don't need firmware if we're using provided images
-  # install firmware
-#  sudo cp $PROJECT_DIR/build/firmware/boot/start*.elf mnt/rpi_boot/ && \
-#  sudo cp $PROJECT_DIR/build/firmware/boot/fixup*.dat mnt/rpi_boot/ && \
-#  sudo cp $PROJECT_DIR/build/firmware/boot/bootcode.bin mnt/rpi_boot/bootcode.bin
 
   # cleanup
   sudo umount /dev/"${SD_CARD_BOOT}"
