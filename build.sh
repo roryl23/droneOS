@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 
-# usage: bash build.sh sda kernel username password base
+# usage:
+# bash build.sh sda kernel base username userpassword ssid ssidpassword
 
 # input parameters
 # lsblk will let you find the value for this parameter:
 SD_CARD=${1:-""}
 # [kernel, kernel7l, kernel8]
 KERNEL=${2:-"kernel"}
-USER=${3:-"admin"}
-PASSWORD=${4:-"adminpassword"}
 # [base, drone]
-TYPE=${5:-"base"}
+TYPE=${3:-"base"}
+USER_NAME=${4:-"admin"}
+USER_PASSWORD=${5:-"adminpassword"}
+SSID=${6:-"droneos"}
+SSID_PASSWORD=${7:-"X0YhW2Wy2bmtKXkT2ST61v2SdBk4FGgE"}
 
 # local variables
 THREADS=8
@@ -99,8 +102,47 @@ if [ -d "build/linux" ]; then
   sudo mkdir -p mnt/rpi_boot/overlays/ && \
   sudo cp "$PROJECT_DIR"/configs/config-"${KERNEL}".txt mnt/rpi_boot
   # set up user to avoid booting into userconfig on first boot
-  PASSWORD_ENCRYPTED=$(echo "$PASSWORD" | openssl passwd -6 -stdin)
-  echo "${USER}:${PASSWORD_ENCRYPTED}" | tee mnt/rpi_boot/userconf.txt
+  PASSWORD_ENCRYPTED=$(echo "$USER_PASSWORD" | openssl passwd -6 -stdin)
+  echo "${USER_NAME}:${PASSWORD_ENCRYPTED}" | sudo tee mnt/rpi_boot/userconf.txt
+  # set up wifi network
+  if [[ $TYPE == "base" ]]; then
+    sudo mkdir -p mnt/rpi_root/home/"${USER_NAME}"/droneOS && \
+    echo "$SSID" | sudo tee mnt/rpi_root/home/"${USER_NAME}"/droneOS/ssid && \
+    echo "$SSID_PASSWORD" | sudo tee mnt/rpi_root/home/"${USER_NAME}"/droneOS/ssid_password
+  elif [[ $TYPE == "drone" ]]; then
+    sudo mkdir -p mnt/rpi_root/etc/NetworkManager/system-connections && \
+    echo "
+[connection]
+id=${SSID}
+uuid=
+type=wifi
+interface-name=wlan0
+autoconnect=true
+
+[wifi]
+mode=infrastructure
+ssid=${SSID}
+
+[wifi-security]
+auth-alg=open
+key-mgmt=wpa-psk
+psk=${SSID_PASSWORD}
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto
+" | sudo tee mnt/rpi_root/etc/NetworkManager/system-connections/"${SSID}".nmconnection && \
+    sudo chmod -Rv 600 mnt/rpi_root/etc/NetworkManager/system-connections/"${SSID}".nmconnection && \
+    sudo chown -Rv root:root mnt/rpi_root/etc/NetworkManager/system-connections/"${SSID}".nmconnection
+  fi
+  # add scripts to base and set final permissions
+  if [[ $TYPE == "base" ]]; then
+    sudo mkdir -p mnt/rpi_root/home/"${USER_NAME}"/droneOS/scripts && \
+    sudo cp "$PROJECT_DIR"/scripts/* mnt/rpi_root/home/"${USER_NAME}"/droneOS/ && \
+    sudo chown -Rv "${USER_NAME}":"${USER_NAME}" mnt/rpi_root/home/"${USER_NAME}"
+  fi
 
   # compile and install kernel
   if [[ "$KERNEL" == "kernel" ]]; then
