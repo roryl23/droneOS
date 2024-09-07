@@ -4,13 +4,14 @@ an optimized system for running drones on the Raspberry PI platform.
 
 ## usage
 
-* `bash install.sh && bash build.sh`
+* Insert your SD card and run: `bash install.sh && bash build.sh`
 
 ## notes
 
-* This won't work quite correctly until the real time patch is merged to the mainline Linux kernel:
+* Currently, we're patching the kernel during build.
+  Once the mainline kernel has the realtime patch,
+  we can remove the kernel source patch and compilation.
   * https://wiki.linuxfoundation.org/realtime/start
-  * Currently we're manually patching the kernel
 
 ## resources
 

@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 
-# usage: bash build.sh sda kernel
+# usage: bash build.sh sda kernel username password
 
 # input parameters
 # lsblk will let you find the value for this parameter:
 SD_CARD=${1:-""}
 KERNEL=${2:-"kernel"}
+USER=${3:-"admin"}
+PASSWORD=${4:-"adminpassword"}
 
 # local variables
 THREADS=8
@@ -78,13 +80,16 @@ if [ -d "build/linux" ]; then
   mkdir -p mnt/rpi_root && \
   sudo mount /dev/"${SD_CARD_BOOT}" mnt/rpi_boot && \
   sudo mount /dev/"${SD_CARD_ROOT}" mnt/rpi_root && \
-  sudo mkdir -p mnt/rpi_boot/overlays/
+  sudo mkdir -p mnt/rpi_boot/overlays/ && \
+  sudo cp "$PROJECT_DIR"/config/config-"${KERNEL}".txt mnt/rpi_boot
+  # set up user to avoid booting into userconfig on first boot
+  PASSWORD_ENCRYPTED=$(echo "$PASSWORD" | openssl passwd -6 -stdin)
+  echo "${USER}:${PASSWORD_ENCRYPTED}" | tee mnt/rpi_boot/userconf.txt
 
   # compile and install kernel
   if [[ "$KERNEL" == "kernel" ]]; then
     make -j${THREADS} KERNEL="$KERNEL" ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- bcmrpi_defconfig && \
     make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- Image modules dtbs && \
-    sudo cp "$PROJECT_DIR"/config/config-${KERNEL}.txt mnt/rpi_boot && \
     sudo env PATH="$PATH" make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH=mnt/rpi_root modules_install && \
     sudo cp arch/arm/boot/dts/broadcom/*.dtb mnt/rpi_boot/ && \
     sudo cp arch/arm/boot/dts/overlays/*.dtb* mnt/rpi_boot/overlays/ && \
@@ -92,7 +97,6 @@ if [ -d "build/linux" ]; then
   elif [[ "$KERNEL" == "kernel7" ]]; then
     make -j${THREADS} KERNEL="$KERNEL" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig && \
     make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- Image modules dtbs && \
-    sudo cp "$PROJECT_DIR"/config/config-"${KERNEL}".txt mnt/rpi_boot && \
     sudo env PATH="$PATH" make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH=mnt/rpi_root modules_install && \
     sudo cp arch/arm/boot/dts/broadcom/*.dtb mnt/rpi_boot/ && \
     sudo cp arch/arm/boot/dts/overlays/*.dtb* mnt/rpi_boot/overlays/ && \
@@ -100,7 +104,6 @@ if [ -d "build/linux" ]; then
   elif [[ "$KERNEL" == "kernel8" ]]; then
     make -j${THREADS} KERNEL="$KERNEL" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig && \
     make -j${THREADS} ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image modules dtbs && \
-    sudo cp "$PROJECT_DIR"/config/config-"${KERNEL}".txt mnt/rpi_boot && \
     sudo env PATH="$PATH" make -j${THREADS} ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH=mnt/rpi_root modules_install && \
     sudo cp arch/arm64/boot/Image mnt/rpi_boot/"$KERNEL".img && \
     sudo cp arch/arm64/boot/dts/broadcom/*.dtb mnt/rpi_boot/ && \
