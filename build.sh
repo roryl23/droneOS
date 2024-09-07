@@ -10,8 +10,10 @@ SD_CARD=${1:-""}
 KERNEL=${2:-"kernel"}
 # [base, drone]
 TYPE=${3:-"base"}
+# login user
 USER_NAME=${4:-"admin"}
 USER_PASSWORD=${5:-"adminpassword"}
+# wifi credentials
 SSID=${6:-"droneos"}
 SSID_PASSWORD=${7:-"X0YhW2Wy2bmtKXkT2ST61v2SdBk4FGgE"}
 
