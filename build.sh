@@ -68,9 +68,15 @@ if [[ "$KERNEL" == "kernel" || "$KERNEL" == "kernel7l" ]]; then
     IMAGE_FILE="2024-07-04-raspios-bookworm-armhf-lite.img"
   fi
 elif [[ "$KERNEL" == "kernel8" ]]; then
-  IMAGE_URL="https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2024-07-04/2024-07-04-raspios-bookworm-arm64-lite.img.xz"
-  IMAGE_FILE_XZ="2024-07-04-raspios-bookworm-arm64-lite.img.xz"
-  IMAGE_FILE="2024-07-04-raspios-bookworm-arm64-lite.img"
+  if [[ "$TYPE" == "base" ]]; then
+    IMAGE_URL="https://downloads.raspberrypi.com/raspios_arm64/images/raspios_arm64-2024-07-04/2024-07-04-raspios-bookworm-arm64.img.xz"
+    IMAGE_FILE_XZ="2024-07-04-raspios-bookworm-arm64.img.xz"
+    IMAGE_FILE="2024-07-04-raspios-bookworm-arm64.img"
+  elif [[ "$TYPE" == "drone" ]]; then
+    IMAGE_URL="https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2024-07-04/2024-07-04-raspios-bookworm-arm64-lite.img.xz"
+    IMAGE_FILE_XZ="2024-07-04-raspios-bookworm-arm64-lite.img.xz"
+    IMAGE_FILE="2024-07-04-raspios-bookworm-arm64-lite.img"
+  fi
 fi
 # fetch, decompress, and write image
 if ! [ -f "$IMAGE_FILE_XZ" ]; then
