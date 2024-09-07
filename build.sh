@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 
-# usage: bash build.sh sda kernel username password
+# usage: bash build.sh sda kernel username password base
 
 # input parameters
 # lsblk will let you find the value for this parameter:
 SD_CARD=${1:-""}
+# [kernel, kernel7l, kernel8]
 KERNEL=${2:-"kernel"}
 USER=${3:-"admin"}
 PASSWORD=${4:-"adminpassword"}
+# [base, drone]
+TYPE=${5:-"base"}
 
 # local variables
 THREADS=8
@@ -45,7 +48,7 @@ if ! [ -d "build/patches" ]; then
   cd $PROJECT_DIR
 fi
 
-# set up sd card with raspberry pi image
+# set up sd card
 sudo parted /dev/"${SD_CARD}" --script <<EOF
 mklabel msdos
 y
@@ -53,23 +56,30 @@ mkpart primary fat32 1MiB 100%
 set 1 lba on
 EOF
 sudo mkfs.ext4 -F /dev/"${SD_CARD_ROOT}"
+# determine which image to get
 if [[ "$KERNEL" == "kernel" || "$KERNEL" == "kernel7l" ]]; then
-  if ! [ -f "2024-07-04-raspios-bookworm-armhf-lite.img.xz" ]; then
-    wget https://downloads.raspberrypi.com/raspios_lite_armhf/images/raspios_lite_armhf-2024-07-04/2024-07-04-raspios-bookworm-armhf-lite.img.xz
+  if [[ "$TYPE" == "base" ]]; then
+    IMAGE_URL="https://downloads.raspberrypi.com/raspios_arm64/images/raspios_arm64-2024-07-04/2024-07-04-raspios-bookworm-arm64.img.xz"
+    IMAGE_FILE_XZ="2024-07-04-raspios-bookworm-arm64.img.xz"
+    IMAGE_FILE="2024-07-04-raspios-bookworm-arm64.img"
+  elif [[ "$TYPE" == "drone" ]]; then
+    IMAGE_URL="https://downloads.raspberrypi.com/raspios_lite_armhf/images/raspios_lite_armhf-2024-07-04/2024-07-04-raspios-bookworm-armhf-lite.img.xz"
+    IMAGE_FILE_XZ="2024-07-04-raspios-bookworm-armhf-lite.img.xz"
+    IMAGE_FILE="2024-07-04-raspios-bookworm-armhf-lite.img"
   fi
-  if ! [ -f "2024-07-04-raspios-bookworm-armhf-lite.img" ]; then
-    xz --threads=${THREADS} --keep -v -d 2024-07-04-raspios-bookworm-armhf-lite.img.xz
-  fi
-  sudo dd bs=1M if=2024-07-04-raspios-bookworm-armhf-lite.img of=/dev/"${SD_CARD}" status=progress
 elif [[ "$KERNEL" == "kernel8" ]]; then
-  if ! [ -f "2024-07-04-raspios-bookworm-arm64-lite.img.xz" ]; then
-    wget https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2024-07-04/2024-07-04-raspios-bookworm-arm64-lite.img.xz
-  fi
-  if ! [ -f "2024-07-04-raspios-bookworm-arm64-lite.img" ]; then
-    xz --threads=${THREADS} --keep -v -d 2024-07-04-raspios-bookworm-arm64-lite.img.xz
-  fi
-  sudo dd bs=1M if=2024-07-04-raspios-bookworm-arm64-lite.img of=/dev/"${SD_CARD}" status=progress
+  IMAGE_URL="https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2024-07-04/2024-07-04-raspios-bookworm-arm64-lite.img.xz"
+  IMAGE_FILE_XZ="2024-07-04-raspios-bookworm-arm64-lite.img.xz"
+  IMAGE_FILE="2024-07-04-raspios-bookworm-arm64-lite.img"
 fi
+# fetch, decompress, and write image
+if ! [ -f "$IMAGE_FILE_XZ" ]; then
+  wget "$IMAGE_URL"
+fi
+if ! [ -f "$IMAGE_FILE" ]; then
+  xz --threads=${THREADS} --keep -v -d "$IMAGE_FILE_XZ"
+fi
+sudo dd bs=1M if="$IMAGE_FILE" of=/dev/"${SD_CARD}" status=progress
 
 # build kernel
 if [ -d "build/linux" ]; then
