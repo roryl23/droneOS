@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 
+# usage: bash build.sh sda kernel
+
 # input parameters
 # lsblk will let you find the value for this parameter:
 SD_CARD=${1:-""}
+KERNEL=${2:-"kernel"}
 
 # local variables
+THREADS=8
 PROJECT_DIR=$PWD
 RPI_LINUX_BRANCH=rpi-6.6.y
 SD_CARD_BOOT="${SD_CARD}1"
 SD_CARD_ROOT="${SD_CARD}2"
-KERNEL=kernel8
 
 # get raspberry pi firmware
 if ! [ -d "build/firmware" ]; then
@@ -40,42 +43,76 @@ if ! [ -d "build/patches" ]; then
   cd $PROJECT_DIR
 fi
 
-# build kernel
-if [ -d "build/linux" ]; then
-  # set up SD card
-  sudo parted /dev/"${SD_CARD}" --script <<EOF
+# set up sd card with raspberry pi image
+sudo parted /dev/"${SD_CARD}" --script <<EOF
 mklabel msdos
 y
-mkpart primary fat32 1MiB 65MiB
+mkpart primary fat32 1MiB 100%
 set 1 lba on
-mkpart primary ext4 65MiB 100%
 EOF
-  sudo mkfs.vfat -F 32 /dev/"${SD_CARD_BOOT}" && \
-  sudo mkfs.ext4 -F /dev/"${SD_CARD_ROOT}" && \
+sudo mkfs.ext4 -F /dev/"${SD_CARD_ROOT}"
+if [[ "$KERNEL" == "kernel" || "$KERNEL" == "kernel7l" ]]; then
+  if ! [ -f "2024-07-04-raspios-bookworm-armhf-lite.img.xz" ]; then
+    wget https://downloads.raspberrypi.com/raspios_lite_armhf/images/raspios_lite_armhf-2024-07-04/2024-07-04-raspios-bookworm-armhf-lite.img.xz
+  fi
+  if ! [ -f "2024-07-04-raspios-bookworm-armhf-lite.img" ]; then
+    xz --threads=${THREADS} --keep -v -d 2024-07-04-raspios-bookworm-armhf-lite.img.xz
+  fi
+  sudo dd bs=1M if=2024-07-04-raspios-bookworm-armhf-lite.img of=/dev/"${SD_CARD}" status=progress
+elif [[ "$KERNEL" == "kernel8" ]]; then
+  if ! [ -f "2024-07-04-raspios-bookworm-arm64-lite.img.xz" ]; then
+    wget https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2024-07-04/2024-07-04-raspios-bookworm-arm64-lite.img.xz
+  fi
+  if ! [ -f "2024-07-04-raspios-bookworm-arm64-lite.img" ]; then
+    xz --threads=${THREADS} --keep -v -d 2024-07-04-raspios-bookworm-arm64-lite.img.xz
+  fi
+  sudo dd bs=1M if=2024-07-04-raspios-bookworm-arm64-lite.img of=/dev/"${SD_CARD}" status=progress
+fi
+
+# build kernel
+if [ -d "build/linux" ]; then
   cd build/linux && \
-  make KERNEL=kernel8 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig && \
   # configure
-  cp $PROJECT_DIR/config/.config . && \
-  #make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- menuconfig && \
-  # build
-  make -j8 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image modules dtbs && \
-  mkdir -p mnt/rpi_boot
-  mkdir -p mnt/rpi_root
+  cp "$PROJECT_DIR"/config/.config . && \
+  mkdir -p mnt/rpi_boot && \
+  mkdir -p mnt/rpi_root && \
   sudo mount /dev/"${SD_CARD_BOOT}" mnt/rpi_boot && \
   sudo mount /dev/"${SD_CARD_ROOT}" mnt/rpi_root && \
-  sudo env PATH=$PATH make -j8 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH=mnt/rpi_root modules_install
-  if [ -f "mnt/rpi_boot/$KERNEL.img" ]; then
-    sudo cp mnt/rpi_boot/"$KERNEL".img mnt/rpi_boot/"$KERNEL"-backup.img
+  sudo mkdir -p mnt/rpi_boot/overlays/
+
+  # compile and install kernel
+  if [[ "$KERNEL" == "kernel" ]]; then
+    make -j${THREADS} KERNEL="$KERNEL" ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- bcmrpi_defconfig && \
+    make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- Image modules dtbs && \
+    sudo cp "$PROJECT_DIR"/config/config-${KERNEL}.txt mnt/rpi_boot && \
+    sudo env PATH="$PATH" make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH=mnt/rpi_root modules_install && \
+    sudo cp arch/arm/boot/dts/broadcom/*.dtb mnt/rpi_boot/ && \
+    sudo cp arch/arm/boot/dts/overlays/*.dtb* mnt/rpi_boot/overlays/ && \
+    sudo cp arch/arm/boot/dts/overlays/README mnt/rpi_boot/overlays/
+  elif [[ "$KERNEL" == "kernel7" ]]; then
+    make -j${THREADS} KERNEL="$KERNEL" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig && \
+    make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- Image modules dtbs && \
+    sudo cp "$PROJECT_DIR"/config/config-"${KERNEL}".txt mnt/rpi_boot && \
+    sudo env PATH="$PATH" make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH=mnt/rpi_root modules_install && \
+    sudo cp arch/arm/boot/dts/broadcom/*.dtb mnt/rpi_boot/ && \
+    sudo cp arch/arm/boot/dts/overlays/*.dtb* mnt/rpi_boot/overlays/ && \
+    sudo cp arch/arm/boot/dts/overlays/README mnt/rpi_boot/overlays/
+  elif [[ "$KERNEL" == "kernel8" ]]; then
+    make -j${THREADS} KERNEL="$KERNEL" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig && \
+    make -j${THREADS} ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image modules dtbs && \
+    sudo cp "$PROJECT_DIR"/config/config-"${KERNEL}".txt mnt/rpi_boot && \
+    sudo env PATH="$PATH" make -j${THREADS} ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH=mnt/rpi_root modules_install && \
+    sudo cp arch/arm64/boot/Image mnt/rpi_boot/"$KERNEL".img && \
+    sudo cp arch/arm64/boot/dts/broadcom/*.dtb mnt/rpi_boot/ && \
+    sudo cp arch/arm64/boot/dts/overlays/*.dtb* mnt/rpi_boot/overlays/ && \
+    sudo cp arch/arm64/boot/dts/overlays/README mnt/rpi_boot/overlays/
   fi
-  sudo cp arch/arm64/boot/Image mnt/rpi_boot/"$KERNEL".img && \
-  sudo cp arch/arm64/boot/dts/broadcom/*.dtb mnt/rpi_boot/ && \
-  sudo mkdir -p mnt/rpi_boot/overlays/ && \
-  sudo cp arch/arm64/boot/dts/overlays/*.dtb* mnt/rpi_boot/overlays/ && \
-  sudo cp arch/arm64/boot/dts/overlays/README mnt/rpi_boot/overlays/ && \
-  # copy raspberry pi firmware
-  sudo cp $PROJECT_DIR/build/firmware/boot/start*.elf mnt/rpi_boot/ && \
-  sudo cp $PROJECT_DIR/build/firmware/boot/fixup*.dat mnt/rpi_boot/ && \
-  sudo cp $PROJECT_DIR/build/firmware/boot/bootcode.bin mnt/rpi_boot/bootcode.bin
+
+  # install firmware
+#  sudo cp $PROJECT_DIR/build/firmware/boot/start*.elf mnt/rpi_boot/ && \
+#  sudo cp $PROJECT_DIR/build/firmware/boot/fixup*.dat mnt/rpi_boot/ && \
+#  sudo cp $PROJECT_DIR/build/firmware/boot/bootcode.bin mnt/rpi_boot/bootcode.bin
+
   # cleanup
   sudo umount /dev/"${SD_CARD_BOOT}"
   sudo umount /dev/"${SD_CARD_ROOT}"
