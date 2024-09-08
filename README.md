@@ -30,8 +30,13 @@ An optimized system for remotely controlling a drone that runs on the Raspberry 
 
 ## resources
 
-* https://www.raspberrypi.com/documentation/computers/linux_kernel.html
-  * https://cdn.kernel.org/pub/linux/kernel/projects/rt/6.6/
-* https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#raspberry-pi-zero-2-w
-* https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#gpio-and-the-40-pin-header
-* https://github.com/xboot/libonnx
+* Raspberry PI
+  * https://www.raspberrypi.com/documentation/computers/linux_kernel.html
+    * https://cdn.kernel.org/pub/linux/kernel/projects/rt/6.6/
+  * https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#raspberry-pi-zero-2-w
+  * https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#gpio-and-the-40-pin-header
+* Go libraries
+  * https://github.com/warthog618/go-gpiocdev
+  * https://github.com/hybridgroup/gobot/tree/release/platforms/joystick
+  * https://github.com/tinygo-org/drivers/tree/release/sx126x
+  * https://github.com/thinkski/go-v4l2

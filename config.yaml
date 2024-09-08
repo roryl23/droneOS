@@ -1,0 +1,3 @@
+logLevel: info
+cameraPort: 7777
+monitorPort: 7776
