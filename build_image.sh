@@ -27,6 +27,11 @@ SD_CARD_ROOT_DEVICE="${SD_CARD}2"
 SD_CARD_BOOT_DIR=$BUILD_DIR/linux/mnt/rpi_boot
 SD_CARD_ROOT_DIR=$BUILD_DIR/linux/mnt/rpi_root
 INSTALL_DIR=$SD_CARD_ROOT_DIR/opt/droneOS
+if [[ $KERNEL == "kernel8" ]]; then
+  ARM=aarch64
+else
+  ARM=arm
+fi
 
 # get kernel source and configure
 if ! [ -d "build/linux" ]; then
@@ -104,7 +109,6 @@ sudo chown -Rv "${USER_NAME}":"${USER_NAME}" "$SD_CARD_ROOT_DIR"/home/"${USER_NA
 
 # set up wifi network
 if [[ $TYPE == "base" ]]; then
-  # copy wifi init script to filesystem
   echo "[Unit]
 Description=Start droneOS wifi network
 Requires=NetworkManager.service sys-subsystem-net-devices-wlan0.service
@@ -118,11 +122,6 @@ RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target" | sudo tee "$SD_CARD_ROOT_DIR"/etc/systemd/system/droneOSNetwork.service
   # chroot to filesystem and enable wifi startup script
-  if [[ $KERNEL == "kernel8" ]]; then
-    ARM=aarch64
-  else
-    ARM=arm
-  fi
   sudo cp /usr/bin/qemu-${ARM}-static "$SD_CARD_ROOT_DIR"/usr/bin/ && \
   sudo chroot "$SD_CARD_ROOT_DIR" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOSNetwork.service'
 elif [[ $TYPE == "drone" ]]; then
@@ -187,13 +186,53 @@ if [ -d "build/linux" ]; then
   cd "$PROJECT_DIR"
 fi
 
-## build droneOS
-#bash build.sh && \
-## install droneOS
-#mkdir -p "$INSTALL_DIR" && \
-#cp droneOS.bin "$INSTALL_DIR" && \
-#cp configs/config.yaml "$INSTALL_DIR" && \
-#sudo cp configs/droneOS.service "$SD_CARD_ROOT_DIR"/lib/systemd/system/
+# build droneOS
+bash build.sh && \
+# install droneOS binary and config
+mkdir -p "$INSTALL_DIR" && \
+cp droneOS.bin "$INSTALL_DIR" && \
+cp configs/config.yaml "$INSTALL_DIR"
+
+# set up systemd unit file
+if [[ $TYPE == "base" ]]; then
+  UNIT_FILE="[Unit]
+Description=Start droneOS application
+Requires=droneOSNetwork.service
+After=droneOSNetwork.service
+
+[Service]
+Type=notify
+WorkingDirectory=/home/$USER_NAME/droneOS/
+ExecStart=/home/$USER_NAME/droneOS/droneOS.bin --config-file config.yaml
+ExecReload=/bin/kill -s HUP \$MAINPID
+TimeoutStartSec=0
+RestartSec=1
+Restart=always
+
+[Install]
+WantedBy=multi-user.target"
+elif [[ $TYPE == "drone" ]]; then
+  UNIT_FILE="[Unit]
+Description=Start droneOS application
+Requires=network-online.service
+After=network-online.service
+
+[Service]
+Type=notify
+WorkingDirectory=/home/$USER_NAME/droneOS/
+ExecStart=/home/$USER_NAME/droneOS/droneOS.bin --config-file config.yaml
+ExecReload=/bin/kill -s HUP \$MAINPID
+TimeoutStartSec=0
+RestartSec=1
+Restart=always
+
+[Install]
+WantedBy=multi-user.target"
+fi
+echo $UNIT_FILE | sudo tee "$SD_CARD_ROOT_DIR"/etc/systemd/system/droneOS.service && \
+# chroot to filesystem and enable wifi startup script
+sudo cp /usr/bin/qemu-${ARM}-static "$SD_CARD_ROOT_DIR"/usr/bin/ && \
+sudo chroot "$SD_CARD_ROOT_DIR" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOS.service'
 
 # cleanup
 sudo umount /dev/"${SD_CARD_BOOT_DEVICE}"
