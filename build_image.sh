@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # usage:
-# bash build.sh sda kernel base username userpassword ssid ssidpassword
+# bash build_image.sh sda kernel base username userpassword ssid ssidpassword
 
 # input parameters
 # lsblk will let you find the value for this parameter:
@@ -20,21 +20,25 @@ SSID_PASSWORD=${7:-"X0YhW2Wy2bmtKXkT2ST61v2SdBk4FGgE"}
 # local variables
 THREADS=8
 PROJECT_DIR=$PWD
+BUILD_DIR=$PROJECT_DIR/build
 RPI_LINUX_BRANCH=rpi-6.6.y
-SD_CARD_BOOT="${SD_CARD}1"
-SD_CARD_ROOT="${SD_CARD}2"
+SD_CARD_BOOT_DEVICE="${SD_CARD}1"
+SD_CARD_ROOT_DEVICE="${SD_CARD}2"
+SD_CARD_BOOT_DIR=$BUILD_DIR/linux/mnt/rpi_boot
+SD_CARD_ROOT_DIR=$BUILD_DIR/linux/mnt/rpi_root
+INSTALL_DIR=$SD_CARD_ROOT_DIR/opt/droneOS
 
 # get kernel source and configure
 if ! [ -d "build/linux" ]; then
   mkdir -p build && \
-  cd build && \
+  cd "${BUILD_DIR}" && \
   git clone --depth=1 https://github.com/raspberrypi/linux && \
   git checkout $RPI_LINUX_BRANCH
   cd "$PROJECT_DIR"
 fi
 # get real time kernel patch
 if ! [ -d "build/patches" ]; then
-  cd build
+  cd "${BUILD_DIR}"
   if ! [ -f "patches-6.6.48-rt40.tar.gz" ]; then
     wget https://cdn.kernel.org/pub/linux/kernel/projects/rt/6.6/patches-6.6.48-rt40.tar.gz
   fi
@@ -53,7 +57,7 @@ y
 mkpart primary fat32 1MiB 100%
 set 1 lba on
 EOF
-sudo mkfs.ext4 -F /dev/"${SD_CARD_ROOT}"
+sudo mkfs.ext4 -F /dev/"${SD_CARD_ROOT_DEVICE}"
 # determine which image to get
 if [[ "$KERNEL" == "kernel" || "$KERNEL" == "kernel7l" ]]; then
   if [[ "$TYPE" == "base" ]]; then
@@ -85,24 +89,45 @@ if ! [ -f "$IMAGE_FILE" ]; then
 fi
 sudo dd bs=1M if="$IMAGE_FILE" of=/dev/"${SD_CARD}" status=progress
 
-# filesystem configuration
-cd build/linux && \
-mkdir -p mnt/rpi_boot && \
-mkdir -p mnt/rpi_root && \
-sudo mount /dev/"${SD_CARD_BOOT}" mnt/rpi_boot && \
-sudo mount /dev/"${SD_CARD_ROOT}" mnt/rpi_root && \
+# filesystem and user configuration
+cd "${BUILD_DIR}"/linux && \
+mkdir -p "${SD_CARD_BOOT_DIR}" && \
+mkdir -p "${SD_CARD_ROOT_DIR}" && \
+sudo mount /dev/"${SD_CARD_BOOT_DEVICE}" "${SD_CARD_BOOT_DIR}" && \
+sudo mount /dev/"${SD_CARD_ROOT_DEVICE}" "${SD_CARD_ROOT_DIR}" && \
 # set up user to avoid booting into userconfig on first boot
 PASSWORD_ENCRYPTED=$(echo "$USER_PASSWORD" | openssl passwd -6 -stdin)
-echo "${USER_NAME}:${PASSWORD_ENCRYPTED}" | sudo tee mnt/rpi_boot/userconf.txt
+echo "${USER_NAME}:${PASSWORD_ENCRYPTED}" | sudo tee "${SD_CARD_BOOT_DIR}"/userconf.txt && \
+sudo mkdir -p "${SD_CARD_ROOT_DIR}"/home/"${USER_NAME}" && \
+# set home directory permissions
+sudo chown -Rv "${USER_NAME}":"${USER_NAME}" "$SD_CARD_ROOT_DIR"/home/"${USER_NAME}"
+
 # set up wifi network
 if [[ $TYPE == "base" ]]; then
-  sudo mkdir -p mnt/rpi_root/home/"${USER_NAME}"/droneOS && \
-  echo "$SSID" | sudo tee mnt/rpi_root/home/"${USER_NAME}"/droneOS/ssid && \
-  echo "$SSID_PASSWORD" | sudo tee mnt/rpi_root/home/"${USER_NAME}"/droneOS/ssid_password
+  # copy wifi init script to filesystem
+  echo "[Unit]
+Description=Start droneOS wifi network
+Requires=NetworkManager.service sys-subsystem-net-devices-wlan0.service
+After=NetworkManager.service sys-subsystem-net-devices-wlan0.service
+
+[Service]
+ExecStart=/usr/bin/nmcli device wifi hotspot ssid $SSID password $SSID_PASSWORD
+Type=oneshot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target" | sudo tee "$SD_CARD_ROOT_DIR"/etc/systemd/system/droneOSNetwork.service
+  # chroot to filesystem and enable wifi startup script
+  if [[ $KERNEL == "kernel8" ]]; then
+    ARM=aarch64
+  else
+    ARM=arm
+  fi
+  sudo cp /usr/bin/qemu-${ARM}-static "$SD_CARD_ROOT_DIR"/usr/bin/ && \
+  sudo chroot "$SD_CARD_ROOT_DIR" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOSNetwork.service'
 elif [[ $TYPE == "drone" ]]; then
-  sudo mkdir -p mnt/rpi_root/etc/NetworkManager/system-connections && \
-  echo "
-[connection]
+  sudo mkdir -p "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections && \
+  echo "[connection]
 id=${SSID}
 uuid=
 type=wifi
@@ -122,60 +147,54 @@ psk=${SSID_PASSWORD}
 method=auto
 
 [ipv6]
-method=auto
-" | sudo tee mnt/rpi_root/etc/NetworkManager/system-connections/"${SSID}".nmconnection && \
-  sudo chmod -Rv 600 mnt/rpi_root/etc/NetworkManager/system-connections/"${SSID}".nmconnection && \
-  sudo chown -Rv root:root mnt/rpi_root/etc/NetworkManager/system-connections/"${SSID}".nmconnection
-fi
-# add scripts to base and set final permissions
-if [[ $TYPE == "base" ]]; then
-  sudo mkdir -p mnt/rpi_root/home/"${USER_NAME}"/droneOS/scripts && \
-  sudo cp "$PROJECT_DIR"/scripts/* mnt/rpi_root/home/"${USER_NAME}"/droneOS/ && \
-  sudo chown -Rv "${USER_NAME}":"${USER_NAME}" mnt/rpi_root/home/"${USER_NAME}"
+method=auto" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections/"${SSID}".nmconnection && \
+  sudo chmod -Rv 600 "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections/"${SSID}".nmconnection && \
+  sudo chown -Rv root:root "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections/"${SSID}".nmconnection
 fi
 cd "$PROJECT_DIR"
 
 # build kernel
 if [ -d "build/linux" ]; then
   # add configs for kernel build
-  cd build/linux && \
+  cd "${BUILD_DIR}"/linux && \
   cp "$PROJECT_DIR"/configs/.config . && \
-  sudo mkdir -p mnt/rpi_boot/overlays/ && \
-  sudo cp "$PROJECT_DIR"/configs/config-"${KERNEL}".txt mnt/rpi_boot
+  sudo mkdir -p "${SD_CARD_BOOT_DIR}"/overlays/ && \
+  sudo cp "$PROJECT_DIR"/configs/config-"${KERNEL}".txt "${SD_CARD_BOOT_DIR}"
   # compile and install kernel
   if [[ "$KERNEL" == "kernel" ]]; then
     make -j${THREADS} KERNEL="$KERNEL" ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- bcmrpi_defconfig && \
     make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- Image modules dtbs && \
-    sudo env PATH="$PATH" make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH=mnt/rpi_root modules_install && \
-    sudo cp arch/arm/boot/dts/broadcom/*.dtb mnt/rpi_boot/ && \
-    sudo cp arch/arm/boot/dts/overlays/*.dtb* mnt/rpi_boot/overlays/ && \
-    sudo cp arch/arm/boot/dts/overlays/README mnt/rpi_boot/overlays/
+    sudo env PATH="$PATH" make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH="${SD_CARD_ROOT_DIR}" modules_install && \
+    sudo cp arch/arm/boot/dts/broadcom/*.dtb "${SD_CARD_BOOT_DIR}"/ && \
+    sudo cp arch/arm/boot/dts/overlays/*.dtb* "${SD_CARD_BOOT_DIR}"/overlays/ && \
+    sudo cp arch/arm/boot/dts/overlays/README "${SD_CARD_BOOT_DIR}"/overlays/
   elif [[ "$KERNEL" == "kernel7" ]]; then
     make -j${THREADS} KERNEL="$KERNEL" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig && \
     make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- Image modules dtbs && \
-    sudo env PATH="$PATH" make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH=mnt/rpi_root modules_install && \
-    sudo cp arch/arm/boot/dts/broadcom/*.dtb mnt/rpi_boot/ && \
-    sudo cp arch/arm/boot/dts/overlays/*.dtb* mnt/rpi_boot/overlays/ && \
-    sudo cp arch/arm/boot/dts/overlays/README mnt/rpi_boot/overlays/
+    sudo env PATH="$PATH" make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH="${SD_CARD_ROOT_DIR}" modules_install && \
+    sudo cp arch/arm/boot/dts/broadcom/*.dtb "${SD_CARD_BOOT_DIR}"/ && \
+    sudo cp arch/arm/boot/dts/overlays/*.dtb* "${SD_CARD_BOOT_DIR}"/overlays/ && \
+    sudo cp arch/arm/boot/dts/overlays/README "${SD_CARD_BOOT_DIR}"/overlays/
   elif [[ "$KERNEL" == "kernel8" ]]; then
     make -j${THREADS} KERNEL="$KERNEL" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig && \
     make -j${THREADS} ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image modules dtbs && \
-    sudo env PATH="$PATH" make -j${THREADS} ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH=mnt/rpi_root modules_install && \
-    sudo cp arch/arm64/boot/Image mnt/rpi_boot/"$KERNEL".img && \
-    sudo cp arch/arm64/boot/dts/broadcom/*.dtb mnt/rpi_boot/ && \
-    sudo cp arch/arm64/boot/dts/overlays/*.dtb* mnt/rpi_boot/overlays/ && \
-    sudo cp arch/arm64/boot/dts/overlays/README mnt/rpi_boot/overlays/
+    sudo env PATH="$PATH" make -j${THREADS} ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH="${SD_CARD_ROOT_DIR}" modules_install && \
+    sudo cp arch/arm64/boot/Image "${SD_CARD_BOOT_DIR}"/"$KERNEL".img && \
+    sudo cp arch/arm64/boot/dts/broadcom/*.dtb "${SD_CARD_BOOT_DIR}"/ && \
+    sudo cp arch/arm64/boot/dts/overlays/*.dtb* "${SD_CARD_BOOT_DIR}"/overlays/ && \
+    sudo cp arch/arm64/boot/dts/overlays/README "${SD_CARD_BOOT_DIR}"/overlays/
   fi
-
-  # cleanup
-  sudo umount /dev/"${SD_CARD_BOOT}"
-  sudo umount /dev/"${SD_CARD_ROOT}"
   cd "$PROJECT_DIR"
 fi
 
-# install source libraries
-cd lib && \
-bash install.sh && \
-cd "$PROJECT_DIR"
+## build droneOS
+#bash build.sh && \
+## install droneOS
+#mkdir -p "$INSTALL_DIR" && \
+#cp droneOS.bin "$INSTALL_DIR" && \
+#cp configs/config.yaml "$INSTALL_DIR" && \
+#sudo cp configs/droneOS.service "$SD_CARD_ROOT_DIR"/lib/systemd/system/
 
-# build droneOS
+# cleanup
+sudo umount /dev/"${SD_CARD_BOOT_DEVICE}"
+sudo umount /dev/"${SD_CARD_ROOT_DEVICE}"
