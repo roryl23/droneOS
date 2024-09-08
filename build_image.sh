@@ -187,11 +187,15 @@ if [ -d "build/linux" ]; then
 fi
 
 # build droneOS
-bash build.sh && \
+if [[ $ARM == "aarch64" ]]; then
+  bash build.sh arm64
+elif [[ $ARM == "arm" ]]; then
+  bash build.sh arm
+fi
 # install droneOS binary and config
 mkdir -p "$INSTALL_DIR" && \
 cp droneOS.bin "$INSTALL_DIR" && \
-cp configs/config.yaml "$INSTALL_DIR"
+cp config.yaml "$INSTALL_DIR"
 
 # set up systemd unit file
 if [[ $TYPE == "base" ]]; then
