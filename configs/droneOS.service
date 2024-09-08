@@ -1,0 +1,18 @@
+[Unit]
+Description=DroneOS Service
+Documentation=https://github.com/roryl23/droneOS
+After=network-online.target
+Wants=network-online.target
+Requires=
+
+[Service]
+Type=notify
+WorkingDirectory=/opt/droneOS
+ExecStart=/opt/droneOS/droneOS.bin --config-file config.yaml
+ExecReload=/bin/kill -s HUP $MAINPID
+TimeoutStartSec=0
+RestartSec=1
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

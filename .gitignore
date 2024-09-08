@@ -1,10 +1,5 @@
 .vscode/
 
-lib/*.tar.*
-lib/libnc
-lib/tcc
-lib/libonnx
-
 *.img*
 
 build/
