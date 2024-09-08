@@ -1,12 +1,17 @@
 # droneOS
 
-An optimized system for running drones.
-
-Designed and tested with the Raspberry PI Zero 2 W
+An optimized system for remotely controlling a drone that runs on the Raspberry PI hardware platform.
 
 ## usage
 
-* Insert your SD card and run: `bash install.sh && bash build.sh`
+* You'll need two RPis, one for the drone, one for the base station
+  * The base station should have a screen, keyboard, and a joystick. 
+    You'll also need an RPi that has a WiFi card.
+* Install build dependencies: `bash install.sh`
+* For each RPi, insert your SD card and run `lsblk` to find which /dev file it is
+* Build the image like this: `bash build_image.sh sda kernel base username userpassword ssid ssidpassword`,
+  changing the parameters for your case.
+  * See the `build_image.sh` file for details on the parameter values
 
 ## Raspberry PI GPIO
 
