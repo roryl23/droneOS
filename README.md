@@ -48,6 +48,14 @@ droneOS logs in a very specific format to allow the base station to know the who
 This is useful for debugging, where one could use the logs emitted by the base station to troubleshoot
 using physics simulations, for example. An example of this is provided in `examples/simulation_debugging`.
 
+Log levels are important. Here are the differences:
+
+* Info: application output for human debugging
+* Debug: output for machine processing
+
+Logs can be filtered with (jq)[https://jqlang.github.io/jq/download]: `./droneOS | jq .`
+
+
 #### Raspberry PI GPIO
 
 * 25 GPIO

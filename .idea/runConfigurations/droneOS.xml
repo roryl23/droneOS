@@ -8,6 +8,9 @@
     <directory value="$PROJECT_DIR$/cmd/droneOS" />
     <filePath value="$PROJECT_DIR$" />
     <output_directory value="$PROJECT_DIR$" />
-    <method v="2" />
+    <method v="2">
+      <option name="ToolBeforeRunTask" enabled="true" actionId="Tool_External Tools_droneOS - create file" />
+      <option name="ToolBeforeRunTask" enabled="true" actionId="Tool_External Tools_droneOS - add execute permissions" />
+    </method>
   </configuration>
 </component>
