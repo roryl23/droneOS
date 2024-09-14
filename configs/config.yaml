@@ -1,2 +1,2 @@
 pluginWaitInterval: 100
-overridePriority: False
+overridePluginDefaults: False

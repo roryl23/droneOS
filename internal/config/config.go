@@ -8,7 +8,8 @@ import (
 )
 
 type Config struct {
-	LogLevel string `yaml:"logLevel"`
+	PluginWaitInterval     string `yaml:"pluginWaitInterval"`
+	OverridePluginDefaults string `yaml:"overridePluginDefaults"`
 }
 
 func GetConfig(file string) Config {

@@ -26,7 +26,7 @@ droneOS operates with a simple core loop that runs in this order:
 
 The general development flow goes like this:
 
-* A user defined algorithm is created here: `internal/plugin/user_defined_algorithm.go` that looks like this:
+* A plugin (user defined algorithm) is created here: `internal/plugin/user_defined_plugin.go` like this:
 
 ```go
 package plugin
@@ -34,13 +34,17 @@ package plugin
 func main() {}
 ```
 
-Your algorithm fundamentally needs to do this:
+Your plugin fundamentally needs to do these things:
   * Utilize input interfaces in `internal/input` to determine what actions need to be taken.
   * Translate into actions that utilize output interfaces in `internal/output`, if necessary.
   * Complete this in less than the millisecond interval configured in `configs/config.yaml` under `pluginWaitInterval`.
 
+In addition, your plugin needs to satisfy the following interfaces:
+
 By default, the main loop will prioritize obstacle avoidance, then process base station commands, over anything else;
-this can be overridden if you're feeling adventurous by changing `overridePriority` in `configs/config.yaml`.
+this can be overridden if you're feeling adventurous by changing `overridePluginDefaults` in `configs/config.yaml`.
+If you override, your plugin needs to handle everything since obstacle avoidance and base station input are implemented
+as plugins.
 
 ### Logging
 
