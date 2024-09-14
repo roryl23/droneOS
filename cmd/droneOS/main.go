@@ -3,8 +3,12 @@ package main
 // github.com/thinkski/go-v4l2
 import (
 	"droneOS/internal/config"
+	"droneOS/internal/gpio"
 	"flag"
 	log "github.com/sirupsen/logrus"
+	"math"
+	"runtime"
+	"runtime/debug"
 )
 
 func main() {
@@ -18,10 +22,10 @@ func main() {
 	settings := config.GetConfig(*configFile)
 	log.Info(settings)
 
-	//debug.SetGCPercent(-1)
-	//debug.SetMemoryLimit(math.MaxInt64)
-	//
-	//gpio.Init()
-	//
-	//runtime.GC()
+	debug.SetGCPercent(-1)
+	debug.SetMemoryLimit(math.MaxInt64)
+
+	gpio.Init()
+
+	runtime.GC()
 }
