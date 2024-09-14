@@ -1,8 +1,8 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="droneOS" type="GoApplicationRunConfiguration" factoryName="Go Application">
+  <configuration default="false" name="droneOS base" type="GoApplicationRunConfiguration" factoryName="Go Application">
     <module name="droneOS" />
     <working_directory value="$PROJECT_DIR$" />
-    <parameters value="--config-file configs/config.yaml" />
+    <parameters value="--mode base --config-file configs/config.yaml" />
     <envs>
       <env name="GOOS" value="linux" />
       <env name="GOARCH" value="amd64" />
