@@ -48,7 +48,7 @@ droneOS logs in a very specific format to allow the base station to know the who
 This is useful for debugging, where one could use the logs emitted by the base station to troubleshoot
 using physics simulations, for example. An example of this is provided in `examples/simulation_debugging`.
 
-### Raspberry PI GPIO
+#### Raspberry PI GPIO
 
 * 25 GPIO
 * 8 ground
@@ -56,13 +56,13 @@ using physics simulations, for example. An example of this is provided in `examp
 * 2 3.3V
 * 2 ID EEPROM
 
-### Notes
+#### Notes
 
 * Currently, we're patching the kernel during build.
   Once the mainline kernel has the realtime patch, we can remove the kernel source patch and compilation:
   * https://wiki.linuxfoundation.org/realtime/start
 
-### Resources
+#### Resources
 
 * Raspberry PI
   * https://www.raspberrypi.com/documentation/computers/linux_kernel.html
