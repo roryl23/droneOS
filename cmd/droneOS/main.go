@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"runtime"
 	"runtime/debug"
+	"time"
 )
 
 func base() {
@@ -46,6 +47,7 @@ func main() {
 	settings := config.GetConfig(*configFile)
 	log.Info(settings)
 
+	// disable automatic garbage collection, we want control of this
 	debug.SetGCPercent(-1)
 	debug.SetMemoryLimit(math.MaxInt64)
 
@@ -62,6 +64,7 @@ func main() {
 		if err != nil {
 			fmt.Println(err)
 		}
+		time.Sleep(time.Second * 1) //TODO: get rid of this
 		runtime.GC()
 	}
 }
