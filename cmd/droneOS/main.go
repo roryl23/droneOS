@@ -2,7 +2,9 @@ package main
 
 // github.com/thinkski/go-v4l2
 import (
+	"droneOS/internal/base"
 	"droneOS/internal/config"
+	"droneOS/internal/drone"
 	"droneOS/internal/gpio"
 	"errors"
 	"flag"
@@ -14,14 +16,6 @@ import (
 	"runtime/debug"
 	"time"
 )
-
-func base() {
-	log.Info("base mode")
-}
-
-func drone() {
-	log.Info("drone mode")
-}
 
 // Helper function to call a function by its name from the map
 func callFunctionByName(funcMap map[string]interface{}, name string) error {
@@ -53,8 +47,8 @@ func main() {
 
 	// Map of function names to functions
 	modeMap := map[string]interface{}{
-		"base":  base,
-		"drone": drone,
+		"base":  base.Main,
+		"drone": drone.Main,
 	}
 
 	gpio.Init()

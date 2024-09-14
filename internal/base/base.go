@@ -1,3 +1,3 @@
 package base
 
-func main() {}
+func Main() {}
