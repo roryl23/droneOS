@@ -35,6 +35,7 @@ fi
 
 # get kernel source and configure
 if ! [ -d "build/linux" ]; then
+  echo "downloading Linux source..."
   mkdir -p build && \
   cd "${BUILD_DIR}" && \
   git clone --depth=1 https://github.com/raspberrypi/linux && \
@@ -45,10 +46,13 @@ fi
 if ! [ -d "build/patches" ]; then
   cd "${BUILD_DIR}"
   if ! [ -f "patches-6.6.48-rt40.tar.gz" ]; then
+    echo "downloading real-time kernel patch..."
     wget https://cdn.kernel.org/pub/linux/kernel/projects/rt/6.6/patches-6.6.48-rt40.tar.gz
   fi
-  tar -xvf patches-6.6.48-rt40.tar.gz && \
-  # apply real time kernel patch
+  echo "extracting real-time kernel patch"
+  tar -xf patches-6.6.48-rt40.tar.gz && \
+
+  echo "applying real-time kernel patch..."
   cd linux && \
   git am -3 ../patches/*
   git am --skip
@@ -56,6 +60,7 @@ if ! [ -d "build/patches" ]; then
 fi
 
 # set up sd card
+echo "setting up sd card..."
 sudo parted /dev/"${SD_CARD}" --script <<EOF
 mklabel msdos
 y
@@ -85,16 +90,18 @@ elif [[ "$KERNEL" == "kernel8" ]]; then
     IMAGE_FILE="2024-07-04-raspios-bookworm-arm64-lite.img"
   fi
 fi
-# fetch, decompress, and write image
 if ! [ -f "$IMAGE_FILE_XZ" ]; then
+  echo "downloading image..."
   wget "$IMAGE_URL"
 fi
 if ! [ -f "$IMAGE_FILE" ]; then
-  xz --threads=${THREADS} --keep -v -d "$IMAGE_FILE_XZ"
+  echo "decompressing image..."
+  xz --threads=${THREADS} --keep -d "$IMAGE_FILE_XZ"
 fi
+echo "writing image to sd card..."
 sudo dd bs=1M if="$IMAGE_FILE" of=/dev/"${SD_CARD}" status=progress
 
-# filesystem and user configuration
+echo "filesystem and user configuration..."
 cd "${BUILD_DIR}"/linux && \
 mkdir -p "${SD_CARD_BOOT_DIR}" && \
 mkdir -p "${SD_CARD_ROOT_DIR}" && \
@@ -107,7 +114,7 @@ sudo mkdir -p "${SD_CARD_ROOT_DIR}"/home/"${USER_NAME}" && \
 # set home directory permissions
 sudo chown -Rv "${USER_NAME}":"${USER_NAME}" "$SD_CARD_ROOT_DIR"/home/"${USER_NAME}"
 
-# set up wifi network
+echo "setting up wifi network..."
 if [[ $TYPE == "base" ]]; then
   echo "[Unit]
 Description=Start droneOS wifi network
@@ -152,7 +159,7 @@ method=auto" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connecti
 fi
 cd "$PROJECT_DIR"
 
-# build kernel
+echo "building Linux kernel..."
 if [ -d "build/linux" ]; then
   # add configs for kernel build
   cd "${BUILD_DIR}"/linux && \
@@ -186,18 +193,19 @@ if [ -d "build/linux" ]; then
   cd "$PROJECT_DIR"
 fi
 
-# build droneOS
+echo "building droneOS binary..."
 if [[ $ARM == "aarch64" ]]; then
   bash build.sh arm64
 elif [[ $ARM == "arm" ]]; then
   bash build.sh arm
 fi
 # install droneOS binary and config
-mkdir -p "$INSTALL_DIR" && \
-cp droneOS.bin "$INSTALL_DIR" && \
-cp config.yaml "$INSTALL_DIR"
+echo "installing droneOS binary and config..."
+sudo mkdir -p "$INSTALL_DIR" && \
+sudo cp droneOS.bin "$INSTALL_DIR" && \
+sudo cp config.yaml "$INSTALL_DIR"
 
-# set up systemd unit file
+echo "setting up systemd unit file..."
 if [[ $TYPE == "base" ]]; then
   UNIT_FILE="[Unit]
 Description=Start droneOS application
@@ -206,8 +214,8 @@ After=droneOSNetwork.service
 
 [Service]
 Type=notify
-WorkingDirectory=/home/$USER_NAME/droneOS/
-ExecStart=/home/$USER_NAME/droneOS/droneOS.bin --config-file config.yaml
+WorkingDirectory=/opt/droneOS/
+ExecStart=/opt/droneOS/droneOS.bin --config-file config.yaml
 ExecReload=/bin/kill -s HUP \$MAINPID
 TimeoutStartSec=0
 RestartSec=1
@@ -223,8 +231,8 @@ After=network-online.service
 
 [Service]
 Type=notify
-WorkingDirectory=/home/$USER_NAME/droneOS/
-ExecStart=/home/$USER_NAME/droneOS/droneOS.bin --config-file config.yaml
+WorkingDirectory=/opt/droneOS/
+ExecStart=/opt/droneOS/droneOS.bin --config-file config.yaml
 ExecReload=/bin/kill -s HUP \$MAINPID
 TimeoutStartSec=0
 RestartSec=1
@@ -233,10 +241,10 @@ Restart=always
 [Install]
 WantedBy=multi-user.target"
 fi
-echo $UNIT_FILE | sudo tee "$SD_CARD_ROOT_DIR"/etc/systemd/system/droneOS.service && \
+echo $UNIT_FILE | sudo tee "${SD_CARD_ROOT_DIR}"/etc/systemd/system/droneOS.service && \
 # chroot to filesystem and enable wifi startup script
-sudo cp /usr/bin/qemu-${ARM}-static "$SD_CARD_ROOT_DIR"/usr/bin/ && \
-sudo chroot "$SD_CARD_ROOT_DIR" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOS.service'
+sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/ && \
+sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOS.service'
 
 # cleanup
 sudo umount /dev/"${SD_CARD_BOOT_DEVICE}"

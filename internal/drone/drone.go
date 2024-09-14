@@ -1,1 +1,3 @@
 package drone
+
+func Init() {}

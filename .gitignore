@@ -3,6 +3,6 @@
 *.img*
 
 build/
-bin/
 *.o
 *.elf
+droneOS

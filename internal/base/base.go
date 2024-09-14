@@ -1,1 +1,3 @@
 package base
+
+func main() {}

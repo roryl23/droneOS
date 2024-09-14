@@ -8,11 +8,7 @@ import (
 )
 
 type Config struct {
-	Debug       bool   `yaml:"debug"`
-	LogLevel    string `yaml:"logLevel"`
-	Address     string `yaml:"address"`
-	CameraPort  int    `yaml:"cameraPort"`
-	MonitorPort int    `yaml:"monitorPort"`
+	LogLevel string `yaml:"logLevel"`
 }
 
 func GetConfig(file string) Config {
