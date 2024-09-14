@@ -3,10 +3,14 @@
     <module name="droneOS" />
     <working_directory value="$PROJECT_DIR$" />
     <parameters value="--config-file configs/config.yaml" />
+    <envs>
+      <env name="GOOS" value="linux" />
+      <env name="GOARCH" value="amd64" />
+    </envs>
     <kind value="DIRECTORY" />
     <package value="droneOS" />
     <directory value="$PROJECT_DIR$/cmd/droneOS" />
-    <filePath value="$PROJECT_DIR$" />
+    <filePath value="$PROJECT_DIR$/../droneOS|$PROJECT_DIR$/cmd/droneOS/main.go" />
     <output_directory value="$PROJECT_DIR$" />
     <method v="2">
       <option name="ToolBeforeRunTask" enabled="true" actionId="Tool_External Tools_droneOS - create file" />
