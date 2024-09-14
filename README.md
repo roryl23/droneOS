@@ -8,7 +8,7 @@ A Go framework for remotely controlling a drone.
   * The base station should have a screen, keyboard, and a joystick. 
     You'll also need an RPi that has a WiFi card.
   * To make your life easiest, get the newest RPi Zero, and 400 or 5
-* Install build dependencies: `bash install.sh`
+* Install build dependencies: `bash setup.sh`
 * For each RPi, insert your SD card and run `lsblk` to find which /dev/sd# file it is
   * NOTE: running `lsblk` is important! Choosing the wrong drive will wreck the data!
 * Unmount the SD card if it's mounted: `sudo umount /dev/sd#1 && sudo umount /dev/sd#2`
