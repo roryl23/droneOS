@@ -1,2 +1,3 @@
 pluginWaitInterval: 100
-overridePluginDefaults: False
+pluginPriority:
+- droneos

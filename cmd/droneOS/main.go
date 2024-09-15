@@ -12,10 +12,19 @@ import (
 	log "github.com/sirupsen/logrus"
 	"math"
 	"reflect"
-	"runtime"
 	"runtime/debug"
-	"time"
 )
+
+// Helper function to call a function by its name from the map
+func callFunctionByName(c *config.Config, funcMap map[string]interface{}, name string) error {
+	fn, ok := funcMap[name]
+	if !ok {
+		return errors.New("mode not found")
+	}
+	input := []reflect.Value{reflect.ValueOf(c)}
+	reflect.ValueOf(fn).Call(input)
+	return nil
+}
 
 // Map of function names to functions
 var modeMap = map[string]interface{}{
@@ -23,18 +32,8 @@ var modeMap = map[string]interface{}{
 	"drone": drone.Main,
 }
 
-// Helper function to call a function by its name from the map
-func callFunctionByName(funcMap map[string]interface{}, name string) error {
-	fn, ok := funcMap[name]
-	if !ok {
-		return errors.New("mode not found")
-	}
-	reflect.ValueOf(fn).Call(nil)
-	return nil
-}
-
 func main() {
-	// disable automatic garbage collection, we want control of this
+	// disable automatic garbage collection
 	debug.SetGCPercent(-1)
 	debug.SetMemoryLimit(math.MaxInt64)
 
@@ -50,11 +49,9 @@ func main() {
 
 	gpio.Init()
 	for {
-		err := callFunctionByName(modeMap, *mode)
+		err := callFunctionByName(&settings, modeMap, *mode)
 		if err != nil {
 			fmt.Println(err)
 		}
-		time.Sleep(time.Second * 1) //TODO: get rid of this
-		runtime.GC()
 	}
 }
