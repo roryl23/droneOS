@@ -1,5 +1,7 @@
 base:
   host: 127.0.0.1
   port: 7000
+drone:
+  id: 1
 pluginPriority:
   - droneos

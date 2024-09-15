@@ -1,6 +1,5 @@
 package main
 
-// github.com/thinkski/go-v4l2
 import (
 	"droneOS/internal/base"
 	"droneOS/internal/config"
@@ -10,33 +9,27 @@ import (
 	"flag"
 	"fmt"
 	log "github.com/sirupsen/logrus"
-	"math"
 	"reflect"
-	"runtime/debug"
 )
 
-// Helper function to call a function by its name from the map
-func callFunctionByName(s *config.Config, funcMap map[string]interface{}, name string) error {
-	fn, ok := funcMap[name]
-	if !ok {
-		return errors.New("mode not found")
-	}
-	input := []reflect.Value{reflect.ValueOf(s)}
-	reflect.ValueOf(fn).Call(input)
-	return nil
-}
-
-// Map of function names to functions
-var modeMap = map[string]interface{}{
+// funcMap Map of function names to functions
+var funcMap = map[string]interface{}{
 	"base":  base.Main,
 	"drone": drone.Main,
 }
 
-func main() {
-	// disable automatic garbage collection
-	debug.SetGCPercent(-1)
-	debug.SetMemoryLimit(math.MaxInt64)
+// callFunctionByName Helper function to call a function by its name from the map
+func callFunctionByName(name string, input interface{}) ([]reflect.Value, error) {
+	fn, ok := funcMap[name]
+	if !ok {
+		return nil, errors.New(fmt.Sprintf("function not found: %s", name))
+	}
+	inputValue := []reflect.Value{reflect.ValueOf(input)}
+	output := reflect.ValueOf(fn).Call(inputValue)
+	return output, nil
+}
 
+func main() {
 	log.SetFormatter(&log.JSONFormatter{})
 	log.SetLevel(log.DebugLevel)
 	log.Info("started droneOS")
@@ -48,10 +41,5 @@ func main() {
 	log.Info(settings)
 
 	gpio.Init()
-	for {
-		err := callFunctionByName(&settings, modeMap, *mode)
-		if err != nil {
-			fmt.Println(err)
-		}
-	}
+	log.Fatal(callFunctionByName(*mode, &settings))
 }

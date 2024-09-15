@@ -15,9 +15,14 @@ type BaseConfig struct {
 	Port int    `yaml:"port"`
 }
 
+type DroneConfig struct {
+	ID int `yaml:"id"`
+}
+
 type Config struct {
-	Base           BaseConfig `yaml:"base"`
-	PluginPriority []string   `yaml:"pluginPriority"`
+	Base           BaseConfig  `yaml:"base"`
+	Drone          DroneConfig `yaml:"drone"`
+	PluginPriority []string    `yaml:"pluginPriority"`
 }
 
 func GetConfig(file string) Config {
