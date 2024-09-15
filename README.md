@@ -62,10 +62,6 @@ Logs can be filtered with (jq)[https://jqlang.github.io/jq/download]:
 
 `./droneOS | jq '.[] | select(.level == "Debug")'`
 
-### Contributing
-
-Feel free to fork the PR and add plugins for your project.
-
 #### Raspberry PI GPIO
 
 * 25 GPIO
@@ -92,3 +88,7 @@ Feel free to fork the PR and add plugins for your project.
   * https://github.com/hybridgroup/gobot/tree/release/platforms/joystick
   * https://github.com/tinygo-org/drivers/tree/release/sx126x
   * https://github.com/thinkski/go-v4l2
+
+#### Contributing
+
+Feel free to fork the PR and add plugins for your project.
