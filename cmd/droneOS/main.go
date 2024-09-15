@@ -16,12 +16,12 @@ import (
 )
 
 // Helper function to call a function by its name from the map
-func callFunctionByName(c *config.Config, funcMap map[string]interface{}, name string) error {
+func callFunctionByName(s *config.Config, funcMap map[string]interface{}, name string) error {
 	fn, ok := funcMap[name]
 	if !ok {
 		return errors.New("mode not found")
 	}
-	input := []reflect.Value{reflect.ValueOf(c)}
+	input := []reflect.Value{reflect.ValueOf(s)}
 	reflect.ValueOf(fn).Call(input)
 	return nil
 }

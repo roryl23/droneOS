@@ -8,7 +8,7 @@ import (
 // Default plugin that implements obstacle avoidance,
 // and processing input from base station
 
-func Main(c *config.Config) {
+func Main(s *config.Config) {
 	log.Info("Starting droneos plugin...")
 	return
 }
