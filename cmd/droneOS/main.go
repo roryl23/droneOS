@@ -17,22 +17,29 @@ import (
 	"time"
 )
 
+// Map of function names to functions
+var modeMap = map[string]interface{}{
+	"base":  base.Main,
+	"drone": drone.Main,
+}
+
 // Helper function to call a function by its name from the map
 func callFunctionByName(funcMap map[string]interface{}, name string) error {
 	fn, ok := funcMap[name]
 	if !ok {
-		return errors.New("function not found")
+		return errors.New("mode not found")
 	}
-
-	// Use reflection to call the function
 	reflect.ValueOf(fn).Call(nil)
 	return nil
 }
 
 func main() {
+	// disable automatic garbage collection, we want control of this
+	debug.SetGCPercent(-1)
+	debug.SetMemoryLimit(math.MaxInt64)
+
 	log.SetFormatter(&log.JSONFormatter{})
 	log.SetLevel(log.DebugLevel)
-
 	log.Info("started droneOS")
 
 	mode := flag.String("mode", "base", "[base, drone]")
@@ -41,18 +48,7 @@ func main() {
 	settings := config.GetConfig(*configFile)
 	log.Info(settings)
 
-	// disable automatic garbage collection, we want control of this
-	debug.SetGCPercent(-1)
-	debug.SetMemoryLimit(math.MaxInt64)
-
-	// Map of function names to functions
-	modeMap := map[string]interface{}{
-		"base":  base.Main,
-		"drone": drone.Main,
-	}
-
 	gpio.Init()
-
 	for {
 		err := callFunctionByName(modeMap, *mode)
 		if err != nil {

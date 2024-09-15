@@ -24,7 +24,7 @@ droneOS operates with a simple core loop that runs in this order:
 * Take action on vector input from base station
 * Execute user defined plugin algorithms
 
-The general development flow goes like this:
+#### General development flow
 
 * A plugin (user defined algorithm) is created here: `internal/plugin/user_defined_plugin.go` like this:
 
@@ -49,16 +49,22 @@ as plugins.
 ### Logging
 
 droneOS logs in a very specific format to allow the base station to know the whole state of the system.
-This is useful for debugging, where one could use the logs emitted by the base station to troubleshoot
-using physics simulations, for example. An example of this is provided in `examples/simulation_debugging`.
+This is useful for debugging, where one could use the logs emitted by the base station to troubleshoot.
+This also allows remote debugging of the drone. 
+Keep in mind that the debug logging only works when the drone is in WiFi range of the base station.
 
 Log levels are important. Here are the differences:
 
 * Info: application output for human debugging
 * Debug: output for machine processing
 
-Logs can be filtered with (jq)[https://jqlang.github.io/jq/download]: `./droneOS | jq .`
+Logs can be filtered with (jq)[https://jqlang.github.io/jq/download]: 
 
+`./droneOS | jq '.[] | select(.level == "Debug")'`
+
+### Contributing
+
+Feel free to fork the PR and add plugins for your project.
 
 #### Raspberry PI GPIO
 
