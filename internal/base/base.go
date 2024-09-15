@@ -20,7 +20,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	fmt.Printf("Received message: %+v\n", msg)
+	log.Infof("Received message: %+v\n", msg)
 	w.WriteHeader(http.StatusOK)
 }
 
