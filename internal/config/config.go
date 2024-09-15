@@ -36,7 +36,7 @@ func GetConfig(file string) Config {
 	return c
 }
 
-func LoadPlugins(c *Config) []func() {
+func LoadPlugins(c *Config) []func(c *Config) {
 	pluginDir := "./"
 
 	// Find all .so files in the directory
@@ -46,7 +46,7 @@ func LoadPlugins(c *Config) []func() {
 	}
 
 	// Load functions in the configured priority order
-	functions := make([]func(), 0)
+	functions := make([]func(c *Config), 0)
 	for _, pluginName := range c.PluginPriority {
 		for _, pluginFile := range pluginFiles {
 			if pluginFile == fmt.Sprintf("plugin_%s_so", pluginName) {
@@ -62,7 +62,7 @@ func LoadPlugins(c *Config) []func() {
 					continue
 				}
 				// Assert that loaded symbol is a function with the correct signature
-				mainFunc, ok := symMain.(func())
+				mainFunc, ok := symMain.(func(c *Config))
 				if !ok {
 					log.Fatalf("Main function in %s has incorrect signature\n", pluginFile)
 					continue
