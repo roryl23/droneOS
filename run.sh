@@ -2,4 +2,4 @@
 
 MODE=${1:-"base"}
 
-./droneOS.bin --mode $MODE
+./droneOS_"${MODE}" --mode "$MODE"

@@ -10,9 +10,14 @@ import (
 	"plugin"
 )
 
+type BaseConfig struct {
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
+}
+
 type Config struct {
-	PluginWaitInterval string   `yaml:"pluginWaitInterval"`
-	PluginPriority     []string `yaml:"pluginPriority"`
+	Base           BaseConfig `yaml:"base"`
+	PluginPriority []string   `yaml:"pluginPriority"`
 }
 
 func GetConfig(file string) Config {
