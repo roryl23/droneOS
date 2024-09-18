@@ -5,7 +5,9 @@
 build/
 *.o
 *.elf
-droneOS_*
-plugin_*
 *.so
 *.bin
+
+droneOS_base
+droneOS_drone
+plugin_droneos_so
