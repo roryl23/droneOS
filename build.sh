@@ -2,8 +2,16 @@
 
 ARCH=${1:-"arm64"}
 
-go mod tidy && \
+go mod tidy -e && \
 # TODO: this can be done automatically for all directories in internal/plugin
-env GOOS=linux GOARCH="$ARCH" GOARM=5 go build -buildmode=plugin -o plugin_droneos.so ./internal/plugin/droneos && \
-env GOOS=linux GOARCH="$ARCH" GOARM=5 go build -o droneOS.bin ./cmd/droneOS && \
+env \
+CGO_ENABLED=1 \
+GOOS=linux \
+GOARCH="$ARCH" \
+go build -buildmode=plugin -o plugin_droneos.so ./internal/plugin/droneos && \
+env \
+CGO_ENABLED=1 \
+GOOS=linux \
+GOARCH="$ARCH" \
+go build -o droneOS.bin ./cmd/droneOS && \
 chmod +x droneOS.bin

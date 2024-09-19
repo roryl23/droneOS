@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # install build dependencies
-sudo apt install \
+sudo apt install -y \
   bc \
   bison \
   flex \
@@ -11,7 +11,3 @@ sudo apt install \
   libncurses5-dev \
   crossbuild-essential-arm64 \
   crossbuild-essential-armhf
-
-# TODO: gotta be a better way to do this
-# create container file for compiled binary
-touch droneOS && chmod +x droneOS
