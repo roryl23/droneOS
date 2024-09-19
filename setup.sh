@@ -10,4 +10,5 @@ sudo apt install -y \
   libc6-dev \
   libncurses5-dev \
   crossbuild-essential-arm64 \
-  crossbuild-essential-armhf
+  crossbuild-essential-armhf \
+  qemu-user-static

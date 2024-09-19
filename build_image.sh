@@ -116,24 +116,29 @@ sudo chown -Rv "${USER_NAME}":"${USER_NAME}" "$SD_CARD_ROOT_DIR"/home/"${USER_NA
 
 echo "setting up wifi network..."
 if [[ $TYPE == "base" ]]; then
-  echo "[Unit]
+  UNIT_FILE=$(cat <<EOF
+[Unit]
 Description=Start droneOS wifi network
 Requires=NetworkManager.service sys-subsystem-net-devices-wlan0.service
 After=NetworkManager.service sys-subsystem-net-devices-wlan0.service
 
 [Service]
-ExecStart=/usr/bin/nmcli device wifi hotspot ssid $SSID password $SSID_PASSWORD
+ExecStart=/usr/bin/nmcli device wifi hotspot ssid ${SSID} password ${SSID_PASSWORD}
 Type=oneshot
 RemainAfterExit=yes
 
 [Install]
-WantedBy=multi-user.target" | sudo tee "$SD_CARD_ROOT_DIR"/etc/systemd/system/droneOSNetwork.service
+WantedBy=multi-user.target
+EOF
+)
+  echo "$UNIT_FILE" | sudo tee "$SD_CARD_ROOT_DIR"/etc/systemd/system/droneOSNetwork.service
   # chroot to filesystem and enable wifi startup script
   sudo cp /usr/bin/qemu-${ARM}-static "$SD_CARD_ROOT_DIR"/usr/bin/ && \
   sudo chroot "$SD_CARD_ROOT_DIR" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOSNetwork.service'
 elif [[ $TYPE == "drone" ]]; then
-  sudo mkdir -p "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections && \
-  echo "[connection]
+  sudo mkdir -p "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections
+NM_FILE=$(cat <<EOF
+[connection]
 id=${SSID}
 uuid=
 type=wifi
@@ -142,7 +147,7 @@ autoconnect=true
 
 [wifi]
 mode=infrastructure
-ssid=${SSID}
+ssid="${SSID}"
 
 [wifi-security]
 auth-alg=open
@@ -153,7 +158,10 @@ psk=${SSID_PASSWORD}
 method=auto
 
 [ipv6]
-method=auto" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections/"${SSID}".nmconnection && \
+method=auto
+EOF
+)
+  echo "$NM_FILE" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections/"${SSID}".nmconnection && \
   sudo chmod -Rv 600 "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections/"${SSID}".nmconnection && \
   sudo chown -Rv root:root "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections/"${SSID}".nmconnection
 fi
@@ -203,11 +211,12 @@ fi
 echo "installing droneOS binary and config..."
 sudo mkdir -p "$INSTALL_DIR" && \
 sudo cp droneOS.bin "$INSTALL_DIR" && \
-sudo cp config.yaml "$INSTALL_DIR"
+sudo cp configs/config.yaml "$INSTALL_DIR"
 
 echo "setting up systemd unit file..."
 if [[ $TYPE == "base" ]]; then
-  UNIT_FILE="[Unit]
+  UNIT_FILE=$(cat <<'EOF'
+[Unit]
 Description=Start droneOS application
 Requires=droneOSNetwork.service
 After=droneOSNetwork.service
@@ -216,15 +225,18 @@ After=droneOSNetwork.service
 Type=notify
 WorkingDirectory=/opt/droneOS/
 ExecStart=/opt/droneOS/droneOS.bin --config-file config.yaml
-ExecReload=/bin/kill -s HUP \$MAINPID
+ExecReload=/bin/kill -s HUP $MAINPID
 TimeoutStartSec=0
 RestartSec=1
 Restart=always
 
 [Install]
-WantedBy=multi-user.target"
+WantedBy=multi-user.target
+EOF
+)
 elif [[ $TYPE == "drone" ]]; then
-  UNIT_FILE="[Unit]
+  UNIT_FILE=$(cat <<'EOF'
+[Unit]
 Description=Start droneOS application
 Requires=network-online.service
 After=network-online.service
@@ -233,15 +245,17 @@ After=network-online.service
 Type=notify
 WorkingDirectory=/opt/droneOS/
 ExecStart=/opt/droneOS/droneOS.bin --config-file config.yaml
-ExecReload=/bin/kill -s HUP \$MAINPID
+ExecReload=/bin/kill -s HUP $MAINPID
 TimeoutStartSec=0
 RestartSec=1
 Restart=always
 
 [Install]
-WantedBy=multi-user.target"
+WantedBy=multi-user.target
+EOF
+)
 fi
-echo $UNIT_FILE | sudo tee "${SD_CARD_ROOT_DIR}"/etc/systemd/system/droneOS.service && \
+echo "$UNIT_FILE" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/systemd/system/droneOS.service && \
 # chroot to filesystem and enable wifi startup script
 sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/ && \
 sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOS.service'
