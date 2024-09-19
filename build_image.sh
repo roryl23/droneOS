@@ -47,7 +47,7 @@ if ! [ -d "build/patches" ]; then
   cd "${BUILD_DIR}"
   if ! [ -f "patches-6.6.48-rt40.tar.gz" ]; then
     echo "downloading real-time kernel patch..."
-    wget https://cdn.kernel.org/pub/linux/kernel/projects/rt/6.6/patches-6.6.48-rt40.tar.gz
+    wget https://cdn.kernel.org/pub/linux/kernel/projects/rt/6.6/older/patches-6.6.48-rt40.tar.gz
   fi
   echo "extracting real-time kernel patch"
   tar -xf patches-6.6.48-rt40.tar.gz && \
