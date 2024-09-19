@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # usage:
-# bash build_image.sh sda kernel base username userpassword ssid ssidpassword
+# bash build_image.sh sd# kernel base username userpassword ssid ssidpassword
 
 # input parameters
 # lsblk will let you find the value for this parameter:

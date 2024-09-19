@@ -5,7 +5,7 @@ if [[ $ARCH == "arm64" ]]; then
   CC=aarch64-linux-gnu-gcc
   ARM=8
 else
-  # gnueabihf?
+  # TODO: gnueabihf?
   CC=arm-linux-gnueabi-gcc
   ARM=5
 fi
