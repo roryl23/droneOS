@@ -3,7 +3,6 @@ package drone
 // github.com/thinkski/go-v4l2
 import (
 	"droneOS/internal/config"
-	"droneOS/internal/gpio"
 	log "github.com/sirupsen/logrus"
 	"math"
 	"net"
@@ -21,9 +20,6 @@ func Main(s *config.Config) {
 	if baseHost == nil {
 		log.Fatalf("Invalid IP address for base host: %s", s.Base.Host)
 	}
-
-	chips := gpio.Init()
-	log.Info("Available chips: ", chips)
 
 	for {
 		err := pingBaseWiFi(s)

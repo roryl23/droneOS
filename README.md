@@ -1,6 +1,6 @@
 # droneOS
 
-A Go framework for remotely controlling a drone.
+A Go framework for remotely and automatically flying a drone.
 
 ## Usage
 
@@ -26,20 +26,15 @@ droneOS operates with a simple core loop that runs in this order:
 
 #### General development flow
 
-* A plugin (user defined algorithm) is created here: `internal/plugin/user_defined_plugin.go` like this:
-
-```go
-package plugin
-
-func main() {}
-```
+* A plugin (user defined algorithm) is created here: `internal/plugin/user_defined_plugin.go`
+  like the default plugin at `internal/plugins/droneos/main.go`
+* Your plugin needs to satisfy the following interfaces:
+  * Have a Main function with the following signature: `Main(s *config.Config)`
 
 Your plugin fundamentally needs to do these things:
   * Utilize input interfaces in `internal/input` to determine what actions need to be taken.
   * Translate into actions that utilize output interfaces in `internal/output`, if necessary.
   * Complete this in less than the millisecond interval configured in `configs/config.yaml` under `pluginWaitInterval`.
-
-In addition, your plugin needs to satisfy the following interfaces:
 
 By default, the main loop will prioritize obstacle avoidance, then process base station commands, over anything else;
 this can be overridden if you're feeling adventurous by changing `overridePluginDefaults` in `configs/config.yaml`.

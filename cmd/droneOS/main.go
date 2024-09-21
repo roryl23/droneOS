@@ -39,7 +39,9 @@ func main() {
 	flag.Parse()
 	settings := config.GetConfig(*configFile)
 	log.Info(settings)
+	
+	chips := gpio.Init()
+	log.Info("Available chips: ", chips)
 
-	gpio.Init()
 	log.Fatal(callFunctionByName(*mode, &settings))
 }

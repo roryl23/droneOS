@@ -46,12 +46,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
 }
 
 func Main(s *config.Config) {
 	http.HandleFunc("/", handler)
 
-	log.Infof("HTTP server listening on port %d ...", s.Base.Port)
+	log.Infof("HTTP server listening on port %d", s.Base.Port)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf("%s:%d", s.Base.Host, s.Base.Port), nil))
 }
