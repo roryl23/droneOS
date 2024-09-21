@@ -2,28 +2,23 @@ package base
 
 import (
 	"droneOS/internal/config"
+	"droneOS/internal/protocol"
 	"encoding/json"
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"net/http"
 )
 
-type Message struct {
-	ID   int    `json:"id"`
-	Type string `json:"type"`
-	Data string `json:"data"`
-}
-
 func handler(w http.ResponseWriter, r *http.Request) {
-	var m Message
-	err := json.NewDecoder(r.Body).Decode(&m)
+	var msg protocol.Message
+	err := json.NewDecoder(r.Body).Decode(&msg)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	log.Debugf("%+v", m)
+	log.Debugf("%+v", msg)
 
-	values, err := callFunctionByName(m.Type, m.Data)
+	values, err := callFunctionByName(msg)
 	if err != nil {
 		log.Fatal(err)
 	} else {

@@ -3,6 +3,7 @@ package drone
 // github.com/thinkski/go-v4l2
 import (
 	"droneOS/internal/config"
+	"droneOS/internal/protocol"
 	log "github.com/sirupsen/logrus"
 	"math"
 	"net"
@@ -22,7 +23,7 @@ func Main(s *config.Config) {
 	}
 
 	for {
-		err := pingBaseWiFi(s)
+		err := protocol.PingBaseWiFi(s)
 		if err != nil {
 			// TODO: send messages over radio
 			log.Error(err)

@@ -18,11 +18,15 @@ A Go framework for remotely and automatically flying a drone.
 
 ## Development
 
-droneOS operates with a simple core loop that runs in this order:
+#### Directories
 
-* Obstacle avoidance
-* Take action on vector input from base station
-* Execute user defined plugin algorithms
+* `internal/base`: base station operation
+* `internal/drone`: drone operation
+* `internal/gpio`: Raspberry Pi GPIO pin interface
+* `internal/input`: Input sensor interfaces
+* `internal/output`: Output interfaces
+* `internal/plugin`: Plugins compiled to shared libraries for user defined behavior
+* `internal/protocol`: Communication protocols for base and drone
 
 #### General development flow
 
@@ -36,10 +40,11 @@ Your plugin fundamentally needs to do these things:
   * Translate into actions that utilize output interfaces in `internal/output`, if necessary.
   * Complete this in less than the millisecond interval configured in `configs/config.yaml` under `pluginWaitInterval`.
 
-By default, the main loop will prioritize obstacle avoidance, then process base station commands, over anything else;
-this can be overridden if you're feeling adventurous by changing `overridePluginDefaults` in `configs/config.yaml`.
+By default, the default priority is configured with the provided `internal/plugin/droneos` as highest.
+This can be overridden if you're feeling adventurous by adjusting plugin priority using `pluginPriority` in 
+`configs/config.yaml`.
 If you override, your plugin needs to handle everything since obstacle avoidance and base station input are implemented
-as plugins.
+in the default plugin.
 
 ### Logging
 
