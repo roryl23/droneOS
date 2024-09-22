@@ -58,7 +58,7 @@ Log levels are important. Here are the differences:
 * Info: application output for human debugging
 * Debug: output for machine processing
 
-Logs can be filtered with (jq)[https://jqlang.github.io/jq/download]: 
+Logs can be filtered with [jq](https://jqlang.github.io/jq/download): 
 
 `./droneOS | jq '.[] | select(.level == "Debug")'`
 
