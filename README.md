@@ -33,7 +33,7 @@ A Go framework for remotely and automatically flying a drone.
 * A plugin (user defined algorithm) is created here: `internal/plugin/user_defined_plugin.go`
   like the default plugin at `internal/plugins/droneos/main.go`
 * Your plugin needs to satisfy the following interfaces:
-  * Have a Main function with the following signature: `Main(s *config.Config)`
+  * Have a `Main` function with the following signature: `Main(s *config.Config)`
 
 Your plugin fundamentally needs to do these things:
   * Utilize input interfaces in `internal/input` to determine what actions need to be taken.
@@ -50,13 +50,15 @@ in the default plugin.
 
 droneOS logs in a very specific format to allow the base station to know the whole state of the system.
 This is useful for debugging the drone offline.
-Keep in mind that the debug logging only works when the drone is in WiFi range of the base station.
-When outside
+Keep in mind that the debug logging only works when the drone is in WiFi range of the base station.,
+in order to save on bandwidth constraints over radio.
 
-Log levels are important. Here are the differences:
-
-* Info: application output for human debugging
-* Debug: output for machine processing
+Log levels are important, and divide two categories of emitted output:
+* Human readable:
+  * Error
+  * Info
+* Machine readable:
+  * Debug
 
 Logs can be filtered with [jq](https://jqlang.github.io/jq/download): 
 
@@ -113,7 +115,6 @@ Notes:
 * Ground Pins: Pins 6, 9, 14, 20, 25, 30, 34, and 39 are ground pins. 
 * GPIO Pins: The GPIO (General Purpose Input/Output) pins can be programmed for various functions. 
 * Special Function Pins: Some GPIO pins have special functions like I²C, SPI, UART, and PWM.
-
 
 #### Notes
 
