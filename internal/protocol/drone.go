@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"io"
 	"net/http"
 )
@@ -38,8 +37,6 @@ func CheckWiFi(s *config.Config, c http.Client) (bool, error) {
 	} else {
 		if n > 0 {
 			data = data[:n]
-			dataString := string(data)
-			log.Info(dataString)
 			var response Message
 			err = json.Unmarshal(data, &response)
 			if err != nil {
