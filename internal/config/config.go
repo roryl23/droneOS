@@ -16,7 +16,8 @@ type BaseConfig struct {
 }
 
 type DroneConfig struct {
-	ID int `yaml:"id"`
+	ID             int  `yaml:"id"`
+	AlwaysUseRadio bool `yaml:"alwaysUseRadio"`
 }
 
 type Config struct {

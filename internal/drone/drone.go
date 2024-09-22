@@ -6,7 +6,6 @@ import (
 	"droneOS/internal/protocol"
 	log "github.com/sirupsen/logrus"
 	"math"
-	"net"
 	"net/http"
 	"runtime"
 	"runtime/debug"
@@ -14,23 +13,24 @@ import (
 )
 
 func Main(s *config.Config) {
-	// disable automatic garbage collection
+	// disable automatic garbage collection,
+	// we handle this in the perpetual loop below
 	debug.SetGCPercent(-1)
 	debug.SetMemoryLimit(math.MaxInt64)
 
-	baseHost := net.ParseIP(s.Base.Host)
-	if baseHost == nil {
-		log.Fatalf("Invalid IP address for base host: %s", s.Base.Host)
-	}
-
 	client := &http.Client{
-		Timeout: 1 * time.Second,
+		Timeout: 10 * time.Millisecond,
 	}
-
 	for {
-		status, err := protocol.CheckWiFi(s, *client)
-		if err != nil || status == false {
-			log.Info("WiFi not connected, using radio...")
+		if !s.Drone.AlwaysUseRadio {
+			status, err := protocol.CheckWiFi(s, *client)
+			if err != nil || status == false {
+				log.Info("WiFi not connected, using radio...")
+			} else {
+				log.Info("WiFi connected, using WiFi...")
+			}
+		} else {
+			log.Info("Always using radio...")
 		}
 
 		pluginFunctions := config.LoadPlugins(s)
@@ -39,6 +39,6 @@ func Main(s *config.Config) {
 		}
 
 		runtime.GC()
-		time.Sleep(time.Second * 1) //TODO: get rid of this
+		time.Sleep(500 * time.Millisecond)
 	}
 }
