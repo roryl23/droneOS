@@ -11,7 +11,7 @@ import (
 	"net/http"
 )
 
-func CheckWiFi(s *config.Config) (bool, error) {
+func CheckWiFi(s *config.Config, c http.Client) (bool, error) {
 	msg := Message{
 		ID:  s.Drone.ID,
 		Cmd: "ping",
@@ -21,7 +21,7 @@ func CheckWiFi(s *config.Config) (bool, error) {
 		return false, errors.New(fmt.Sprintf("error encoding JSON: %s", err))
 	}
 
-	resp, err := http.Post(
+	resp, err := c.Post(
 		fmt.Sprintf("http://%s:%d", s.Base.Host, s.Base.Port),
 		"application/json",
 		bytes.NewBuffer(msgBytes),

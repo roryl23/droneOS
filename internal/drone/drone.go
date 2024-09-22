@@ -7,6 +7,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"math"
 	"net"
+	"net/http"
 	"runtime"
 	"runtime/debug"
 	"time"
@@ -22,10 +23,14 @@ func Main(s *config.Config) {
 		log.Fatalf("Invalid IP address for base host: %s", s.Base.Host)
 	}
 
+	client := &http.Client{
+		Timeout: 1 * time.Second,
+	}
+
 	for {
-		status, err := protocol.CheckWiFi(s)
+		status, err := protocol.CheckWiFi(s, *client)
 		if err != nil || status == false {
-			// TODO: send messages over radio
+			log.Info("WiFi not connected, using radio...")
 		}
 
 		pluginFunctions := config.LoadPlugins(s)
