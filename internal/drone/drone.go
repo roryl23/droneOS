@@ -23,10 +23,9 @@ func Main(s *config.Config) {
 	}
 
 	for {
-		err := protocol.PingBaseWiFi(s)
-		if err != nil {
+		status, err := protocol.CheckWiFi(s)
+		if err != nil || status == false {
 			// TODO: send messages over radio
-			log.Error(err)
 		}
 
 		pluginFunctions := config.LoadPlugins(s)

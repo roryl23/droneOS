@@ -11,14 +11,14 @@ import (
 	"net/http"
 )
 
-func PingBaseWiFi(s *config.Config) error {
+func CheckWiFi(s *config.Config) (bool, error) {
 	msg := Message{
 		ID:  s.Drone.ID,
 		Cmd: "ping",
 	}
 	msgBytes, err := json.Marshal(msg)
 	if err != nil {
-		return errors.New(fmt.Sprintf("error encoding JSON: %s", err))
+		return false, errors.New(fmt.Sprintf("error encoding JSON: %s", err))
 	}
 
 	resp, err := http.Post(
@@ -27,14 +27,14 @@ func PingBaseWiFi(s *config.Config) error {
 		bytes.NewBuffer(msgBytes),
 	)
 	if err != nil {
-		return errors.New(fmt.Sprintf("error sending request: %s", err))
+		return false, errors.New(fmt.Sprintf("error sending request: %s", err))
 	}
 	defer resp.Body.Close()
 
 	data := make([]byte, 1024)
 	n, err := resp.Body.Read(data)
 	if err != nil && err != io.EOF {
-		log.Error("error reading data: ", err)
+		return false, errors.New(fmt.Sprintf("error reading request: %s", err))
 	} else {
 		if n > 0 {
 			data = data[:n]
@@ -43,12 +43,14 @@ func PingBaseWiFi(s *config.Config) error {
 			var response Message
 			err = json.Unmarshal(data, &response)
 			if err != nil {
-				return errors.New(fmt.Sprintf("error decoding JSON: %s", err))
+				return false, errors.New(fmt.Sprintf("error decoding JSON: %s", err))
 			}
 			if response.Data != "pong" {
-				return errors.New(fmt.Sprintf("invalid response: %s", response.Data))
+				return false, errors.New(fmt.Sprintf("invalid response: %s", response.Data))
+			} else {
+				return true, nil
 			}
 		}
 	}
-	return nil
+	return false, nil
 }
