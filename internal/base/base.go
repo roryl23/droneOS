@@ -18,18 +18,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Debugf("%+v", msg)
 
-	values, err := callFunctionByName(msg)
+	output, err := callFunctionByName(msg)
 	if err != nil {
 		log.Fatal(err)
 	} else {
-		// Convert reflect.Value to interface{} and collect in a slice
-		var interfaces []interface{}
-		for _, v := range values {
-			interfaces = append(interfaces, v.Interface())
-		}
-
-		// Serialize the slice of interfaces to JSON
-		data, err := json.Marshal(interfaces)
+		data, err := json.Marshal(output.Interface())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -48,6 +41,9 @@ func Main(s *config.Config) {
 
 	log.Infof("HTTP server listening on port %d", s.Base.Port)
 	log.Fatal(
-		http.ListenAndServe(fmt.Sprintf("%s:%d", s.Base.Host, s.Base.Port), nil),
+		http.ListenAndServe(
+			fmt.Sprintf("%s:%d", s.Base.Host, s.Base.Port),
+			nil,
+		),
 	)
 }

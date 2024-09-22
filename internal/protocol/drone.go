@@ -18,7 +18,7 @@ func PingBaseWiFi(s *config.Config) error {
 	}
 	msgBytes, err := json.Marshal(msg)
 	if err != nil {
-		errors.New("error encoding JSON")
+		return errors.New(fmt.Sprintf("error encoding JSON: %s", err))
 	}
 
 	resp, err := http.Post(
@@ -27,7 +27,7 @@ func PingBaseWiFi(s *config.Config) error {
 		bytes.NewBuffer(msgBytes),
 	)
 	if err != nil {
-		return errors.New("error sending request")
+		return errors.New(fmt.Sprintf("error sending request: %s", err))
 	}
 	defer resp.Body.Close()
 
@@ -40,13 +40,13 @@ func PingBaseWiFi(s *config.Config) error {
 			data = data[:n]
 			dataString := string(data)
 			log.Info(dataString)
-			response := Message{}
+			var response Message
 			err = json.Unmarshal(data, &response)
 			if err != nil {
 				return errors.New(fmt.Sprintf("error decoding JSON: %s", err))
 			}
 			if response.Data != "pong" {
-				return errors.New("invalid response")
+				return errors.New(fmt.Sprintf("invalid response: %s", response.Data))
 			}
 		}
 	}
