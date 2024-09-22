@@ -49,9 +49,9 @@ in the default plugin.
 ### Logging
 
 droneOS logs in a very specific format to allow the base station to know the whole state of the system.
-This is useful for debugging, where one could use the logs emitted by the base station to troubleshoot.
-This also allows remote debugging of the drone. 
+This is useful for debugging the drone offline.
 Keep in mind that the debug logging only works when the drone is in WiFi range of the base station.
+When outside
 
 Log levels are important. Here are the differences:
 
@@ -60,15 +60,60 @@ Log levels are important. Here are the differences:
 
 Logs can be filtered with [jq](https://jqlang.github.io/jq/download): 
 
-`./droneOS | jq '.[] | select(.level == "Debug")'`
+`./droneOS.bin | jq '.[] | select(.level == "Debug")'`
 
 #### Raspberry PI GPIO
 
-* 25 GPIO
-* 8 ground
-* 2 5V
-* 2 3.3V
-* 2 ID EEPROM
+| Pin | Name   | BCM GPIO | Function                   |
+|-----|--------|----------|----------------------------|
+| 1   | 3.3V   |          | Power                      |
+| 2   | 5V     |          | Power                      |
+| 3   | GPIO2  | GPIO2    | SDA1, I²C Data             |
+| 4   | 5V     |          | Power                      |
+| 5   | GPIO3  | GPIO3    | SCL1, I²C Clock            |
+| 6   | GND    |          | Ground                     |
+| 7   | GPIO4  | GPIO4    | GPCLK0                     |
+| 8   | GPIO14 | GPIO14   | UART0_TXD                  |
+| 9   | GND    |          | Ground                     |
+| 10  | GPIO15 | GPIO15   | UART0_RXD                  |
+| 11  | GPIO17 | GPIO17   | GPIO_GEN0                  |
+| 12  | GPIO18 | GPIO18   | PCM_CLK, PWM0              |
+| 13  | GPIO27 | GPIO27   | GPIO_GEN2                  |
+| 14  | GND    |          | Ground                     |
+| 15  | GPIO22 | GPIO22   | GPIO_GEN3                  |
+| 16  | GPIO23 | GPIO23   | GPIO_GEN4                  |
+| 17  | 3.3V   |          | Power                      |
+| 18  | GPIO24 | GPIO24   | GPIO_GEN5                  |
+| 19  | GPIO10 | GPIO10   | SPI0_MOSI                  |
+| 20  | GND    |          | Ground                     |
+| 21  | GPIO9  | GPIO9    | SPI0_MISO                  |
+| 22  | GPIO25 | GPIO25   | GPIO_GEN6                  |
+| 23  | GPIO11 | GPIO11   | SPI0_SCLK                  |
+| 24  | GPIO8  | GPIO8    | SPI0_CE0_N                 |
+| 25  | GND    |          | Ground                     |
+| 26  | GPIO7  | GPIO7    | SPI0_CE1_N                 |
+| 27  | ID_SD  | GPIO0    | I²C ID EEPROM Data (ID_SD) |
+| 28  | ID_SC  | GPIO1    | I²C ID EEPROM Clock (ID_SC)|
+| 29  | GPIO5  | GPIO5    | GPIO_GEN1                  |
+| 30  | GND    |          | Ground                     |
+| 31  | GPIO6  | GPIO6    | GPIO_GEN2                  |
+| 32  | GPIO12 | GPIO12   | PWM0                       |
+| 33  | GPIO13 | GPIO13   | PWM1                       |
+| 34  | GND    |          | Ground                     |
+| 35  | GPIO19 | GPIO19   | PCM_FS, PWM1               |
+| 36  | GPIO16 | GPIO16   | GPIO_GEN4                  |
+| 37  | GPIO26 | GPIO26   | GPIO_GEN7                  |
+| 38  | GPIO20 | GPIO20   | PCM_DIN                    |
+| 39  | GND    |          | Ground                     |
+| 40  | GPIO21 | GPIO21   | PCM_DOUT                   |
+
+Notes:
+
+* Power Pins: Pins 1 (3.3V), 2 (5V), 4 (5V), and 17 (3.3V) are power supply pins. 
+* Ground Pins: Pins 6, 9, 14, 20, 25, 30, 34, and 39 are ground pins. 
+* GPIO Pins: The GPIO (General Purpose Input/Output) pins can be programmed for various functions. 
+* Special Function Pins: Some GPIO pins have special functions like I²C, SPI, UART, and PWM.
+
 
 #### Notes
 
