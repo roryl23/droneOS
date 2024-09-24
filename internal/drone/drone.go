@@ -18,6 +18,12 @@ func Main(s *config.Config) {
 	debug.SetGCPercent(-1)
 	debug.SetMemoryLimit(math.MaxInt64)
 
+	sensorFunctions := config.LoadSensorPlugins(s)
+	for _, plugin := range sensorFunctions {
+		go plugin(s)
+	}
+	controlAlgorithmFunctions := config.LoadControlAlgorithmPlugins(s)
+
 	client := &http.Client{
 		Timeout: 10 * time.Millisecond,
 	}
@@ -33,8 +39,8 @@ func Main(s *config.Config) {
 			log.Info("Always using radio...")
 		}
 
-		pluginFunctions := config.LoadPlugins(s)
-		for _, plugin := range pluginFunctions {
+		// run control algorithm plugins in order of priority
+		for _, plugin := range controlAlgorithmFunctions {
 			plugin(s)
 		}
 

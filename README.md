@@ -66,6 +66,14 @@ Logs can be filtered with [jq](https://jqlang.github.io/jq/download):
 
 #### Raspberry PI GPIO
 
+
+* 25 GPIO 
+* 8 ground 
+* 2 5V 
+* 2 3.3V 
+* 2 ID EEPROM
+
+
 | Pin | Name   | BCM GPIO | Function                   |
 |-----|--------|----------|----------------------------|
 | 1   | 3.3V   |          | Power                      |

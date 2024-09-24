@@ -4,5 +4,10 @@ base:
 drone:
   id: 1
   alwaysUseRadio: False
+sensorPriority:
+  - gyroscope
+  - infrared
+  - ultrasonic
+  - gps
 pluginPriority:
   - droneos
