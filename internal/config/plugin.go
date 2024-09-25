@@ -8,7 +8,7 @@ import (
 	"plugin"
 )
 
-func LoadSensorPlugins(c *Config) []func(c *Config, ch chan<- sensor.Event) {
+func LoadSensorPlugins(c *Config) []func(c *Config, ch *chan sensor.Event) {
 	pluginDir := "./"
 
 	// Find all .so files in the directory
@@ -18,7 +18,7 @@ func LoadSensorPlugins(c *Config) []func(c *Config, ch chan<- sensor.Event) {
 	}
 
 	// Load functions in the configured priority order
-	functions := make([]func(c *Config, ch chan<- sensor.Event), 0)
+	functions := make([]func(c *Config, ch *chan sensor.Event), 0)
 	for _, pluginName := range c.SensorPriority {
 		for _, pluginFile := range pluginFiles {
 			if pluginFile == fmt.Sprintf("plugin_%s_so", pluginName) {
@@ -34,7 +34,7 @@ func LoadSensorPlugins(c *Config) []func(c *Config, ch chan<- sensor.Event) {
 					continue
 				}
 				// Assert that loaded symbol is a function with the correct signature
-				mainFunc, ok := symMain.(func(c *Config, ch chan<- sensor.Event))
+				mainFunc, ok := symMain.(func(c *Config, ch *chan sensor.Event))
 				if !ok {
 					log.Fatalf("Main function in %s has incorrect signature\n", pluginFile)
 					continue

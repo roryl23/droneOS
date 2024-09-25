@@ -23,7 +23,7 @@ func Main(s *config.Config) {
 	sensorEvents := make(chan sensor.Event)
 	sensorFunctions := config.LoadSensorPlugins(s)
 	for _, plugin := range sensorFunctions {
-		go plugin(s, sensorEvents)
+		go plugin(s, &sensorEvents)
 	}
 	controlAlgorithmFunctions := config.LoadControlAlgorithmPlugins(s)
 
