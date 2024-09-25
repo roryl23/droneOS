@@ -11,4 +11,4 @@ build/
 
 droneOS_base
 droneOS_drone
-plugin_droneos_so
+plugin_*

@@ -210,7 +210,7 @@ fi
 # install droneOS binary and config
 echo "installing droneOS binary and config..."
 sudo mkdir -p "$INSTALL_DIR" && \
-sudo cp droneOS.bin "$INSTALL_DIR" && \
+sudo cp build/droneOS/* "$INSTALL_DIR" && \
 sudo cp configs/config.yaml "$INSTALL_DIR"
 
 echo "setting up systemd unit file..."

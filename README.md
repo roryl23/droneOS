@@ -4,10 +4,22 @@ A Go framework for remotely and automatically flying a drone.
 
 ## Usage
 
-* You'll need two RPis, one for the drone, one for the base station
-  * The base station should have a screen, keyboard, and a joystick. 
-    You'll also need an RPi that has a WiFi card.
-  * To make your life easiest, get the newest RPi Zero, and 400 or 5
+### Hardware
+
+* You'll need one RPi for the drone. 
+  To make your life easiest, get the newest RPi Zero
+* You have two choices of base station; PC or another RPi
+  * If you use a PC:
+    * You'll need a radio communication module that plugs in via USB
+    * Joystick
+  * If you use an RPi:
+    * WiFi card, unless you disable WiFi communication for your setup
+    * Screen
+    * Keyboard
+    * Joystick
+
+### Software
+
 * Install build dependencies: `bash setup.sh`
 * For each RPi, insert your SD card and run `lsblk` to find which `/dev/sd#` file it is
   * NOTE: running `lsblk` is important! Choosing the wrong drive will wreck the data!
@@ -18,7 +30,7 @@ A Go framework for remotely and automatically flying a drone.
 
 ## Development
 
-#### Directories
+### Directories
 
 * `internal/base`: base station operation
 * `internal/drone`: drone operation
@@ -28,7 +40,7 @@ A Go framework for remotely and automatically flying a drone.
 * `internal/plugin`: Plugins compiled to shared libraries for user defined behavior
 * `internal/protocol`: Communication protocols for base and drone
 
-#### General development flow
+### General development flow
 
 * A plugin (user defined algorithm) is created here: `internal/plugin/user_defined_plugin.go`
   like the default plugin at `internal/plugins/droneos/main.go`
@@ -64,7 +76,7 @@ Logs can be filtered with [jq](https://jqlang.github.io/jq/download):
 
 `./droneOS.bin | jq '.[] | select(.level == "Debug")'`
 
-#### Raspberry PI GPIO
+### Raspberry PI GPIO
 
 
 * 25 GPIO 
@@ -117,16 +129,16 @@ Logs can be filtered with [jq](https://jqlang.github.io/jq/download):
 | 39  | GND    |          | Ground                     |
 | 40  | GPIO21 | GPIO21   | PCM_DOUT                   |
 
-Notes:
+#### Other detail
 
 * Power Pins: Pins 1 (3.3V), 2 (5V), 4 (5V), and 17 (3.3V) are power supply pins. 
 * Ground Pins: Pins 6, 9, 14, 20, 25, 30, 34, and 39 are ground pins. 
 * GPIO Pins: The GPIO (General Purpose Input/Output) pins can be programmed for various functions. 
 * Special Function Pins: Some GPIO pins have special functions like I²C, SPI, UART, and PWM.
 
-#### Notes
+### Notes
 
-* Currently, we're patching the kernel during build.
+* Currently, we're patching the kernel during compilation from source.
   Once the mainline kernel has the realtime patch, we can remove the kernel source patch and compilation:
   * https://wiki.linuxfoundation.org/realtime/start
 

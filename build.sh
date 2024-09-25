@@ -10,20 +10,21 @@ else
   ARM=5
 fi
 
+export CC="$CC" \
+  CGO_ENABLED=1 \
+  GOOS=linux \
+  GOARCH="$ARCH" \
+  GOARM="$ARM" \
+
+mkdir -p build/droneOS && \
 go mod tidy -e && \
-# TODO: this can be done automatically for all directories in internal/plugin
-env \
-CC="$CC" \
-CGO_ENABLED=1 \
-GOOS=linux \
-GOARCH="$ARCH" \
-GOARM="$ARM" \
-go build -buildmode=plugin -o plugin_droneos.so ./internal/plugin/droneos && \
-env \
-CC="$CC" \
-CGO_ENABLED=1 \
-GOOS=linux \
-GOARCH="$ARCH" \
-GOARM="$ARM" \
-go build -o droneOS.bin ./cmd/droneOS && \
-chmod +x droneOS.bin
+# plugin builds
+go build -buildmode=plugin -o build/droneOS/plugin_ca_droneos.so ./internal/plugin/droneos && \
+# TODO: this can be done automatically for all directories that require plugin builds
+go build -buildmode=plugin -o build/droneOS/plugin_sensor_frienda_obstacle_431S.so ./internal/input/sensor/plugin/frienda_obstacle_431S && \
+go build -buildmode=plugin -o build/droneOS/plugin_sensor_GT_U7.so ./internal/input/sensor/plugin/GT_U7 && \
+go build -buildmode=plugin -o build/droneOS/plugin_sensor_HC_SR04.so ./internal/input/sensor/plugin/HC_SR04 && \
+go build -buildmode=plugin -o build/droneOS/plugin_sensor_MPU_6050.so ./internal/input/sensor/plugin/MPU_6050 && \
+# application
+go build -o build/droneOS/droneOS.bin ./cmd/droneOS && \
+chmod +x build/droneOS/droneOS.bin

@@ -1,13 +1,14 @@
 package config
 
 import (
+	"droneOS/internal/input/sensor"
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"path/filepath"
 	"plugin"
 )
 
-func LoadSensorPlugins(c *Config) []func(c *Config) {
+func LoadSensorPlugins(c *Config) []func(c *Config, ch chan<- sensor.Event) {
 	pluginDir := "./"
 
 	// Find all .so files in the directory
@@ -17,7 +18,7 @@ func LoadSensorPlugins(c *Config) []func(c *Config) {
 	}
 
 	// Load functions in the configured priority order
-	functions := make([]func(c *Config), 0)
+	functions := make([]func(c *Config, ch chan<- sensor.Event), 0)
 	for _, pluginName := range c.SensorPriority {
 		for _, pluginFile := range pluginFiles {
 			if pluginFile == fmt.Sprintf("plugin_%s_so", pluginName) {
@@ -33,7 +34,7 @@ func LoadSensorPlugins(c *Config) []func(c *Config) {
 					continue
 				}
 				// Assert that loaded symbol is a function with the correct signature
-				mainFunc, ok := symMain.(func(c *Config))
+				mainFunc, ok := symMain.(func(c *Config, ch chan<- sensor.Event))
 				if !ok {
 					log.Fatalf("Main function in %s has incorrect signature\n", pluginFile)
 					continue

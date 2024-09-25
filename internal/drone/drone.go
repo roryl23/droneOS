@@ -3,6 +3,7 @@ package drone
 // github.com/thinkski/go-v4l2
 import (
 	"droneOS/internal/config"
+	"droneOS/internal/input/sensor"
 	"droneOS/internal/protocol"
 	log "github.com/sirupsen/logrus"
 	"math"
@@ -18,9 +19,11 @@ func Main(s *config.Config) {
 	debug.SetGCPercent(-1)
 	debug.SetMemoryLimit(math.MaxInt64)
 
+	// initialize and run sensors
+	sensorEvents := make(chan sensor.Event)
 	sensorFunctions := config.LoadSensorPlugins(s)
 	for _, plugin := range sensorFunctions {
-		go plugin(s)
+		go plugin(s, sensorEvents)
 	}
 	controlAlgorithmFunctions := config.LoadControlAlgorithmPlugins(s)
 
