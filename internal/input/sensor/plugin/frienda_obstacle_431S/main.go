@@ -10,6 +10,6 @@ import (
 func Main(s *config.Config, eventCh *chan sensor.Event) {
 	for {
 		log.Info("sensor plugin frienda_obstacle_431S is running")
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}
 }

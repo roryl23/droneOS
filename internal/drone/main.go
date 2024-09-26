@@ -34,7 +34,7 @@ func Main(s *config.Config) {
 	heap.Init(&pq)
 
 	outputPlugins := output.LoadPlugins(s)
-	go output.Main(pq, outputPlugins)
+	go output.Main(&pq, outputPlugins)
 
 	controlAlgorithmPlugins := control.LoadPlugins(s)
 	for priority, controlAlgorithm := range controlAlgorithmPlugins {

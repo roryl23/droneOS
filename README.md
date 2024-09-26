@@ -38,25 +38,21 @@ A Go framework for remotely and automatically flying a drone.
 * `internal/input`: Input sensor interfaces
 * `internal/output`: Output interfaces
 * `internal/control`: Control algorithms compiled to shared libraries
-* `internal/protocol`: Communication protocols for base and drone
+* `internal/protocol`: Communication protocol for base and drone
 
 ### General development flow
 
-* A plugin (user defined algorithm) is created here: `internal/plugin/user_defined_plugin.go`
-  like the default plugin at `internal/plugins/droneos/main.go`
-* Your plugin needs to satisfy the following interfaces:
-  * Have a `Main` function with the following signature: `Main(s *config.Config)`
+* A user defined control algorithm is created here: `internal/control/some_name/main.go`
+* Your algorithm needs to satisfy the following interfaces:
+  * Have a `Main` function with the following signature: 
+    `Main(c *config.Config, priority int, eCh *chan sensor.Event, pq *output.Queue)`
 
-Your plugin fundamentally needs to do these things:
+Your algorithm fundamentally needs to do these things:
   * Utilize input interfaces in `internal/input` to determine what actions need to be taken.
   * Translate into actions that utilize output interfaces in `internal/output`, if necessary.
-  * Complete this in less than the millisecond interval configured in `configs/config.yaml` under `pluginWaitInterval`.
 
-By default, the default priority is configured with the provided `internal/plugin/droneos` as highest.
-This can be overridden if you're feeling adventurous by adjusting plugin priority using `pluginPriority` in 
-`configs/config.yaml`.
-If you override, your plugin needs to handle everything since obstacle avoidance and base station input are implemented
-in the default plugin.
+If you write more than one control algorithm, such as the default examples of `obstacle_avoidance` and `pilot`,
+you'll need to define their priority using `controlAlgorithmPriority` in `configs/config.yaml`.
 
 ### Logging
 

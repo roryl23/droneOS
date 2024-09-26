@@ -61,7 +61,7 @@ func LoadPlugins(c *config.Config) []Output {
 	pluginDir := "./"
 
 	// Find all .so files in the directory
-	pluginFiles, err := filepath.Glob(filepath.Join(pluginDir, "output_*so"))
+	pluginFiles, err := filepath.Glob(filepath.Join(pluginDir, "*so"))
 	if err != nil {
 		log.Fatalf("Error finding plugin files: %v", err)
 	}
@@ -95,10 +95,10 @@ func LoadPlugins(c *config.Config) []Output {
 	return functions
 }
 
-func Main(pq Queue, plugins []Output) {
+func Main(pq *Queue, plugins []Output) {
 	for {
 		for pq.Len() > 0 {
-			task := heap.Pop(&pq).(*Task)
+			task := heap.Pop(pq).(*Task)
 			for _, output := range plugins {
 				if output.Name == task.Name {
 					err := output.Main(task.Input)
@@ -108,6 +108,6 @@ func Main(pq Queue, plugins []Output) {
 				}
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}
 }

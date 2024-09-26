@@ -10,22 +10,22 @@ import (
 	"plugin"
 )
 
-type ControlAlgorithm struct {
+type Algorithm struct {
 	Name string
 	Main func(c *config.Config, priority int, sCh *chan sensor.Event, pq *output.Queue)
 }
 
-func LoadPlugins(c *config.Config) []ControlAlgorithm {
+func LoadPlugins(c *config.Config) []Algorithm {
 	pluginDir := "./"
 
 	// Find all .so files in the directory
-	pluginFiles, err := filepath.Glob(filepath.Join(pluginDir, "ca_*so"))
+	pluginFiles, err := filepath.Glob(filepath.Join(pluginDir, "*so"))
 	if err != nil {
 		log.Fatalf("Error finding plugin files: %v", err)
 	}
 
 	// Load functions in the configured priority order
-	functions := make([]ControlAlgorithm, 0)
+	functions := make([]Algorithm, 0)
 	for _, pluginName := range c.Drone.ControlAlgorithmPriority {
 		for _, pluginFile := range pluginFiles {
 			if pluginFile == fmt.Sprintf("%s_so", pluginName) {
@@ -46,7 +46,7 @@ func LoadPlugins(c *config.Config) []ControlAlgorithm {
 					log.Fatalf("Main function in %s has incorrect signature\n", pluginFile)
 					continue
 				}
-				functions = append(functions, ControlAlgorithm{Name: pluginName, Main: mainFunc})
+				functions = append(functions, Algorithm{Name: pluginName, Main: mainFunc})
 			}
 		}
 	}

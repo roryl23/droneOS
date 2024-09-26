@@ -9,10 +9,9 @@ import (
 	"time"
 )
 
-func Main(s *config.Config, priority int, sensorEvent chan sensor.Event, pq *output.Queue) {
-	log.Info("Starting obstacle_avoidance plugin...")
-
+func Main(s *config.Config, priority int, sensorEvent *chan sensor.Event, pq *output.Queue) {
 	for {
+		log.Info("control algorithm obstacle_avoidance running")
 
 		motor := "hawks_work_ESC"
 		motorInput := make([]uint8, 4)
@@ -28,6 +27,6 @@ func Main(s *config.Config, priority int, sensorEvent chan sensor.Event, pq *out
 		}
 		heap.Push(pq, task)
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}
 }
