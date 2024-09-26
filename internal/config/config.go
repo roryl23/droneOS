@@ -12,16 +12,22 @@ type BaseConfig struct {
 	Port int    `yaml:"port"`
 }
 
+type Device struct {
+	Name string `yaml:"name"`
+	Pins []int  `yaml:"pins"`
+}
+
 type DroneConfig struct {
-	ID             int  `yaml:"id"`
-	AlwaysUseRadio bool `yaml:"alwaysUseRadio"`
+	ID                       int      `yaml:"id"`
+	AlwaysUseRadio           bool     `yaml:"alwaysUseRadio"`
+	Sensors                  []Device `yaml:"sensors"`
+	Outputs                  []Device `yaml:"outputs"`
+	ControlAlgorithmPriority []string `yaml:"controlAlgorithmPriority"`
 }
 
 type Config struct {
-	Base                     BaseConfig  `yaml:"base"`
-	Drone                    DroneConfig `yaml:"drone"`
-	SensorPriority           []string    `yaml:"sensorPriority"`
-	ControlAlgorithmPriority []string    `yaml:"controlAlgorithmPriority"`
+	Base  BaseConfig  `yaml:"base"`
+	Drone DroneConfig `yaml:"drone"`
 }
 
 func GetConfig(file string) Config {

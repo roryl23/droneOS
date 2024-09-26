@@ -12,3 +12,6 @@ sudo apt install -y \
   crossbuild-essential-arm64 \
   crossbuild-essential-armhf \
   qemu-user-static
+
+# create build directory
+mkdir -p build/droneOS

@@ -1,6 +1,9 @@
 package gpio
 
 type Layout struct {
-	Pin     int
-	PinName string
+}
+
+type Pin struct {
+	Number int
+	Type   string
 }

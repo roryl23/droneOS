@@ -2,8 +2,11 @@ package drone
 
 // github.com/thinkski/go-v4l2
 import (
+	"container/heap"
 	"droneOS/internal/config"
+	"droneOS/internal/control"
 	"droneOS/internal/input/sensor"
+	"droneOS/internal/output"
 	"droneOS/internal/protocol"
 	log "github.com/sirupsen/logrus"
 	"math"
@@ -20,12 +23,23 @@ func Main(s *config.Config) {
 	debug.SetMemoryLimit(math.MaxInt64)
 
 	// initialize and run sensors
-	sensorEvents := make(chan sensor.Event)
-	sensorFunctions := config.LoadSensorPlugins(s)
-	for _, plugin := range sensorFunctions {
-		go plugin(s, &sensorEvents)
+	sensorEventChannel := make(chan sensor.Event)
+	sensorPlugins := sensor.LoadPlugins(s)
+	for _, sensorPlugin := range sensorPlugins {
+		go sensorPlugin.Main(s, &sensorEventChannel)
 	}
-	controlAlgorithmFunctions := config.LoadControlAlgorithmPlugins(s)
+
+	// create a priority queue and initialize
+	pq := make(output.Queue, 0)
+	heap.Init(&pq)
+
+	outputPlugins := output.LoadPlugins(s)
+	go output.Main(pq, outputPlugins)
+
+	controlAlgorithmPlugins := control.LoadPlugins(s)
+	for priority, controlAlgorithm := range controlAlgorithmPlugins {
+		go controlAlgorithm.Main(s, priority, &sensorEventChannel, &pq)
+	}
 
 	client := &http.Client{
 		Timeout: 10 * time.Millisecond,
@@ -40,11 +54,6 @@ func Main(s *config.Config) {
 			}
 		} else {
 			log.Info("Always using radio...")
-		}
-
-		// run control algorithm plugins in order of priority
-		for _, plugin := range controlAlgorithmFunctions {
-			plugin(s)
 		}
 
 		runtime.GC()

@@ -37,7 +37,7 @@ A Go framework for remotely and automatically flying a drone.
 * `internal/gpio`: Raspberry Pi GPIO pin interface
 * `internal/input`: Input sensor interfaces
 * `internal/output`: Output interfaces
-* `internal/plugin`: Plugins compiled to shared libraries for user defined behavior
+* `internal/control`: Control algorithms compiled to shared libraries
 * `internal/protocol`: Communication protocols for base and drone
 
 ### General development flow

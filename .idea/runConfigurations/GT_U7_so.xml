@@ -1,0 +1,14 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="GT_U7_so" type="GoApplicationRunConfiguration" factoryName="Go Application" folderName="sensor">
+    <module name="droneOS" />
+    <working_directory value="$PROJECT_DIR$/build/droneOS" />
+    <go_parameters value="-buildmode=plugin" />
+    <kind value="FILE" />
+    <package value="droneOS" />
+    <directory value="$PROJECT_DIR$" />
+    <filePath value="$PROJECT_DIR$/internal/input/sensor/plugin/GT_U7/main.go" />
+    <output_directory value="$PROJECT_DIR$/build/droneOS" />
+    <option name="run" value="false" />
+    <method v="2" />
+  </configuration>
+</component>
