@@ -2,13 +2,11 @@ package drone
 
 // github.com/thinkski/go-v4l2
 import (
-	"container/heap"
 	"droneOS/internal/config"
 	"droneOS/internal/control"
 	"droneOS/internal/input/sensor"
 	"droneOS/internal/output"
 	"droneOS/internal/protocol"
-	log "github.com/sirupsen/logrus"
 	"math"
 	"net/http"
 	"runtime"
@@ -29,16 +27,15 @@ func Main(s *config.Config) {
 		go sensorPlugin.Main(s, &sensorEventChannel)
 	}
 
-	// create a priority queue and initialize
-	pq := make(output.Queue, 0)
-	heap.Init(&pq)
+	taskQueue := make(chan output.Task)
 
 	outputPlugins := output.LoadPlugins(s)
-	go output.Main(&pq, outputPlugins)
+	go output.Main(taskQueue, outputPlugins)
 
+	priorityMutex := control.NewPriorityMutex()
 	controlAlgorithmPlugins := control.LoadPlugins(s)
 	for priority, controlAlgorithm := range controlAlgorithmPlugins {
-		go controlAlgorithm.Main(s, priority, &sensorEventChannel, &pq)
+		go controlAlgorithm.Main(s, priority+1, priorityMutex, &sensorEventChannel, taskQueue)
 	}
 
 	client := &http.Client{
@@ -48,12 +45,12 @@ func Main(s *config.Config) {
 		if !s.Drone.AlwaysUseRadio {
 			status, err := protocol.CheckWiFi(s, *client)
 			if err != nil || status == false {
-				log.Info("WiFi not connected, using radio...")
+				//log.Info("WiFi not connected, using radio...")
 			} else {
-				log.Info("WiFi connected, using WiFi...")
+				//log.Info("WiFi connected, using WiFi...")
 			}
 		} else {
-			log.Info("Always using radio...")
+			//log.Info("Always using radio...")
 		}
 
 		runtime.GC()

@@ -1,7 +1,6 @@
 package output
 
 import (
-	"container/heap"
 	"droneOS/internal/config"
 	"fmt"
 	log "github.com/sirupsen/logrus"
@@ -15,41 +14,6 @@ type Task struct {
 	Index    int    // the index of the item in the heap
 	Name     string // plugin
 	Input    interface{}
-}
-
-// Queue implements heap.Interface and holds Tasks.
-type Queue []*Task
-
-func (pq Queue) Len() int { return len(pq) }
-
-// Less determines the priority (higher priority comes first)
-func (pq Queue) Less(i, j int) bool {
-	return pq[i].Priority < pq[j].Priority
-}
-
-func (pq Queue) Swap(i, j int) {
-	pq[i], pq[j] = pq[j], pq[i]
-	pq[i].Index = i
-	pq[j].Index = j
-}
-
-// Push adds a Task to the heap
-func (pq *Queue) Push(x interface{}) {
-	n := len(*pq)
-	task := x.(*Task)
-	task.Index = n
-	*pq = append(*pq, task)
-}
-
-// Pop removes and returns the highest priority Task
-func (pq *Queue) Pop() interface{} {
-	old := *pq
-	n := len(old)
-	task := old[n-1]
-	old[n-1] = nil  // avoid memory leak
-	task.Index = -1 // for safety
-	*pq = old[0 : n-1]
-	return task
 }
 
 type Output struct {
@@ -95,16 +59,14 @@ func LoadPlugins(c *config.Config) []Output {
 	return functions
 }
 
-func Main(pq *Queue, plugins []Output) {
+func Main(tq chan Task, plugins []Output) {
 	for {
-		for pq.Len() > 0 {
-			task := heap.Pop(pq).(*Task)
-			for _, output := range plugins {
-				if output.Name == task.Name {
-					err := output.Main(task.Input)
-					if err != nil {
-						log.Error(err)
-					}
+		task := <-tq
+		for _, output := range plugins {
+			if output.Name == task.Name {
+				err := output.Main(task.Input)
+				if err != nil {
+					log.Error(err)
 				}
 			}
 		}
