@@ -14,8 +14,8 @@ func Main(
 	s *config.Config,
 	priority int,
 	priorityMutex *control.PriorityMutex,
-	sensorEvent *chan sensor.Event,
-	tq chan output.Task,
+	sensorEvents *chan sensor.Event,
+	taskQueue *chan output.Task,
 ) {
 	for {
 		time.Sleep(time.Duration(rand.Intn(200-100+1)+100) * time.Millisecond)

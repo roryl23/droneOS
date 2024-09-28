@@ -24,6 +24,10 @@ func Main(s *config.Config) {
 
 	// initialize and run sensors
 	sensorEventChannels := make([]chan sensor.Event, len(s.Drone.Sensors))
+	for i := range sensorEventChannels {
+		sensorEventChannels[i] = make(chan sensor.Event)
+	}
+
 	for _, device := range s.Drone.Sensors {
 		go func() {
 			_, err := utils.CallFunctionByName(
@@ -50,7 +54,7 @@ func Main(s *config.Config) {
 				index+1,
 				priorityMutex,
 				&sensorEventChannels[index],
-				taskQueue,
+				&taskQueue,
 			)
 			if err != nil {
 				log.Error(err)
@@ -79,7 +83,12 @@ func Main(s *config.Config) {
 		for _, device := range s.Drone.Outputs {
 			if device.Name == task.Name {
 				go func() {
-					_, err := utils.CallFunctionByName(OutputFuncMap, device.Name, task.Input)
+					_, err := utils.CallFunctionByName(
+						OutputFuncMap,
+						device.Name,
+						s,
+						&taskQueue,
+					)
 					if err != nil {
 						log.Error(err)
 					}

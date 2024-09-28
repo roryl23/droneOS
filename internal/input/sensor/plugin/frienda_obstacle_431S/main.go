@@ -6,9 +6,18 @@ import (
 	"time"
 )
 
-func Main(s *config.Config, eCh *[]chan sensor.Event) {
+func Main(
+	s *config.Config,
+	eCh *[]chan sensor.Event,
+) {
+	name := "frienda_obstacle_431S"
 	for {
-		//log.Info("sensor plugin frienda_obstacle_431S is running")
+		for _, ch := range *eCh {
+			ch <- sensor.Event{
+				Name: name,
+				Data: 0,
+			}
+		}
 		time.Sleep(500 * time.Millisecond)
 	}
 }

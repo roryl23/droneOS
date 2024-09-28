@@ -1,12 +1,20 @@
 package hawks_work_ESC
 
 import (
+	"droneOS/internal/config"
+	"droneOS/internal/output"
+	log "github.com/sirupsen/logrus"
 	"time"
 )
 
-func Main(i interface{}) error {
+func Main(
+	s *config.Config,
+	taskQueue *chan output.Task,
+) error {
 	for {
-		//log.Info("output plugin hawks_work_ESC running. Input: ", i)
+		task := <-*taskQueue
+		log.Info("task: ", task)
+
 		time.Sleep(500 * time.Millisecond)
 	}
 }

@@ -1,8 +1,8 @@
 package output
 
 type Task struct {
-	Name  string // plugin
-	Input interface{}
+	Name string // package
+	Data interface{}
 }
 
 type Output struct {

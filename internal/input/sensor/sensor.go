@@ -5,7 +5,8 @@ import (
 )
 
 type Event struct {
-	Type string
+	Name string
+	Data interface{}
 }
 
 type Sensor struct {
