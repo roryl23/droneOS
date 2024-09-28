@@ -1,4 +1,4 @@
-package main
+package MPU_6050
 
 import (
 	"droneOS/internal/config"

@@ -1,4 +1,4 @@
-package main
+package MG90S
 
 import (
 	"time"

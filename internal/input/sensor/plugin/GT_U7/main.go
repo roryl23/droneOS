@@ -1,4 +1,4 @@
-package main
+package GT_U7
 
 import (
 	"droneOS/internal/config"

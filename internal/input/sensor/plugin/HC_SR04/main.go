@@ -1,4 +1,4 @@
-package main
+package HC_SR04
 
 import (
 	"droneOS/internal/config"

@@ -1,4 +1,4 @@
-package main
+package pilot
 
 import (
 	"droneOS/internal/config"

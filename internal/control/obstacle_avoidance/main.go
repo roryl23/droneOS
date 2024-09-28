@@ -1,4 +1,4 @@
-package main
+package obstacle_avoidance
 
 import (
 	"droneOS/internal/config"
@@ -39,6 +39,5 @@ func Main(
 
 		time.Sleep(time.Duration(rand.Intn(200-100+1)+100) * time.Millisecond)
 		priorityMutex.Unlock()
-		log.Info("control algorithm obstacle_avoidance finished")
 	}
 }

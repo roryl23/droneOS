@@ -1,4 +1,4 @@
-package main
+package hawks_work_ESC
 
 import (
 	"time"

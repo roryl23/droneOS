@@ -5,28 +5,14 @@ import (
 	"droneOS/internal/config"
 	"droneOS/internal/drone"
 	"droneOS/internal/gpio"
-	"errors"
+	"droneOS/internal/utils"
 	"flag"
-	"fmt"
 	log "github.com/sirupsen/logrus"
-	"reflect"
 )
 
-// funcMap Map of function names to functions
 var funcMap = map[string]interface{}{
 	"base":  base.Main,
 	"drone": drone.Main,
-}
-
-// callFunctionByName Helper function to call a function by its name from the map
-func callFunctionByName(name string, input interface{}) ([]reflect.Value, error) {
-	fn, ok := funcMap[name]
-	if !ok {
-		return nil, errors.New(fmt.Sprintf("function not found: %s", name))
-	}
-	inputValue := []reflect.Value{reflect.ValueOf(input)}
-	output := reflect.ValueOf(fn).Call(inputValue)
-	return output, nil
 }
 
 func main() {
@@ -39,9 +25,9 @@ func main() {
 	flag.Parse()
 	settings := config.GetConfig(*configFile)
 	log.Info(settings)
-	
+
 	chips := gpio.Init()
 	log.Info("Available chips: ", chips)
 
-	log.Fatal(callFunctionByName(*mode, &settings))
+	log.Fatal(utils.CallFunctionByName(funcMap, *mode, &settings))
 }

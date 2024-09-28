@@ -7,6 +7,8 @@ import (
 	"droneOS/internal/input/sensor"
 	"droneOS/internal/output"
 	"droneOS/internal/protocol"
+	"droneOS/internal/utils"
+	log "github.com/sirupsen/logrus"
 	"math"
 	"net/http"
 	"runtime"
@@ -21,23 +23,42 @@ func Main(s *config.Config) {
 	debug.SetMemoryLimit(math.MaxInt64)
 
 	// initialize and run sensors
-	sensorEventChannel := make(chan sensor.Event)
-	sensorPlugins := sensor.LoadPlugins(s)
-	for _, sensorPlugin := range sensorPlugins {
-		go sensorPlugin.Main(s, &sensorEventChannel)
+	sensorEventChannels := make([]chan sensor.Event, len(s.Drone.Sensors))
+	for _, device := range s.Drone.Sensors {
+		go func() {
+			_, err := utils.CallFunctionByName(
+				SensorFuncMap,
+				device.Name,
+				s,
+				&sensorEventChannels,
+			)
+			if err != nil {
+				log.Error(err)
+			}
+		}()
 	}
 
+	// initialize and run control algorithms
 	taskQueue := make(chan output.Task)
-
-	outputPlugins := output.LoadPlugins(s)
-	go output.Main(taskQueue, outputPlugins)
-
 	priorityMutex := control.NewPriorityMutex()
-	controlAlgorithmPlugins := control.LoadPlugins(s)
-	for priority, controlAlgorithm := range controlAlgorithmPlugins {
-		go controlAlgorithm.Main(s, priority+1, priorityMutex, &sensorEventChannel, taskQueue)
+	for index, name := range s.Drone.ControlAlgorithmPriority {
+		go func() {
+			_, err := utils.CallFunctionByName(
+				ControlFuncMap,
+				name,
+				s,
+				index+1,
+				priorityMutex,
+				&sensorEventChannels[index],
+				taskQueue,
+			)
+			if err != nil {
+				log.Error(err)
+			}
+		}()
 	}
 
+	// main loop that runs forever
 	client := &http.Client{
 		Timeout: 10 * time.Millisecond,
 	}
@@ -51,6 +72,19 @@ func Main(s *config.Config) {
 			}
 		} else {
 			//log.Info("Always using radio...")
+		}
+
+		// handle output according to current task queue
+		task := <-taskQueue
+		for _, device := range s.Drone.Outputs {
+			if device.Name == task.Name {
+				go func() {
+					_, err := utils.CallFunctionByName(OutputFuncMap, device.Name, task.Input)
+					if err != nil {
+						log.Error(err)
+					}
+				}()
+			}
 		}
 
 		runtime.GC()

@@ -8,15 +8,6 @@
     <directory value="$PROJECT_DIR$" />
     <filePath value="$PROJECT_DIR$/cmd/droneOS/main.go" />
     <output_directory value="$PROJECT_DIR$/build/droneOS" />
-    <method v="2">
-      <option name="RunConfigurationTask" enabled="true" run_configuration_name="pilot_so" run_configuration_type="GoApplicationRunConfiguration" />
-      <option name="RunConfigurationTask" enabled="true" run_configuration_name="obstacle_avoidance_so" run_configuration_type="GoApplicationRunConfiguration" />
-      <option name="RunConfigurationTask" enabled="true" run_configuration_name="frienda_obstacle_431S_so" run_configuration_type="GoApplicationRunConfiguration" />
-      <option name="RunConfigurationTask" enabled="true" run_configuration_name="MPU_6050_so" run_configuration_type="GoApplicationRunConfiguration" />
-      <option name="RunConfigurationTask" enabled="true" run_configuration_name="HC_SR04_so" run_configuration_type="GoApplicationRunConfiguration" />
-      <option name="RunConfigurationTask" enabled="true" run_configuration_name="GT_U7_so" run_configuration_type="GoApplicationRunConfiguration" />
-      <option name="RunConfigurationTask" enabled="true" run_configuration_name="hawks_work_ESC_so" run_configuration_type="GoApplicationRunConfiguration" />
-      <option name="RunConfigurationTask" enabled="true" run_configuration_name="MG90S_so" run_configuration_type="GoApplicationRunConfiguration" />
-    </method>
+    <method v="2" />
   </configuration>
 </component>
