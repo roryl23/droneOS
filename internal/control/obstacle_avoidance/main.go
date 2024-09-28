@@ -17,7 +17,7 @@ func Main(
 	sensorEvents *chan sensor.Event,
 	taskQueue *chan output.Task,
 ) {
-	name := "hawks_work_ESC"
+	motor := "hawks_work_ESC"
 	for {
 		sensorEvent := <-*sensorEvents
 		log.Info("sensorEvent: ", sensorEvent)
@@ -25,7 +25,7 @@ func Main(
 		priorityMutex.Lock(priority)
 
 		task := output.Task{
-			Name: name,
+			Name: motor,
 			Data: 0,
 		}
 		*taskQueue <- task

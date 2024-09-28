@@ -12,3 +12,6 @@ build/
 droneOS_base
 droneOS_drone
 plugin_*
+
+venv/
+docs/
