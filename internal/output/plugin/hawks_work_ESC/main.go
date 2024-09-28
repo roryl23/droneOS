@@ -8,7 +8,7 @@ import (
 )
 
 func Main(
-	s *config.Config,
+	s *config.Device,
 	taskQueue *chan output.Task,
 ) error {
 	for {

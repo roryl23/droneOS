@@ -6,7 +6,10 @@ import (
 	"time"
 )
 
-func Main(s *config.Config, eventCh *chan sensor.Event) {
+func Main(
+	s *config.Device,
+	eventCh *chan sensor.Event,
+) {
 	for {
 		//log.Info("sensor plugin GT_U7 is running")
 		time.Sleep(500 * time.Millisecond)

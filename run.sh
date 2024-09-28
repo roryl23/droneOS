@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
 
-MODE=${1:-"base"}
+./build/droneOS/base --mode base --config-file ./configs/config.yaml &
+basePid=$!
+./build/droneOS/drone --mode drone --config-file ./configs/config.yaml &
+dronePid=$!
 
-./droneOS_"${MODE}" --mode "$MODE"
+# define cleanup function
+cleanup() {
+  echo "terminating background processes..."
+  kill "$basePid" "$dronePid"
+  wait "$basePid" "$dronePid"
+}
+
+# trap EXIT and other signals
+trap cleanup EXIT SIGINT SIGTERM
+
+wait

@@ -17,8 +17,16 @@ type Device struct {
 	Pins []int  `yaml:"pins"`
 }
 
+type Radio struct {
+	Name      string `yaml:"name"`
+	AlwaysUse bool   `yaml:"alwaysUse"`
+	Pins      []int  `yaml:"pins"`
+	UsbId     string `yaml:"usbId"`
+}
+
 type DroneConfig struct {
 	ID                       int      `yaml:"id"`
+	Radio                    Radio    `yaml:"radio"`
 	AlwaysUseRadio           bool     `yaml:"alwaysUseRadio"`
 	Sensors                  []Device `yaml:"sensors"`
 	Outputs                  []Device `yaml:"outputs"`

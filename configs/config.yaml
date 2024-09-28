@@ -3,7 +3,10 @@ base:
   port: 7000
 drone:
   id: 1
-  alwaysUseRadio: False
+  radio:
+    name: SX1262
+    alwaysUse: False
+    usbId: /dev/usb0
   sensors:
     - name: frienda_obstacle_431S
       config:

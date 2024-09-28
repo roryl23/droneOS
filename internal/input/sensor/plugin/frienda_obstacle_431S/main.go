@@ -7,7 +7,7 @@ import (
 )
 
 func Main(
-	s *config.Config,
+	s *config.Device,
 	eCh *[]chan sensor.Event,
 ) {
 	//name := "frienda_obstacle_431S"
