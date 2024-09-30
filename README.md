@@ -147,7 +147,7 @@ Logs can be filtered with [jq](https://jqlang.github.io/jq/download):
   * https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#gpio-and-the-40-pin-header
 * Go libraries
   * https://github.com/warthog618/go-gpiocdev
-  * https://github.com/hybridgroup/gobot/tree/release/platforms/joystick
+  * https://gobot.io/documentation/drivers
   * https://github.com/tinygo-org/drivers/tree/release/sx126x
   * https://github.com/thinkski/go-v4l2
 
