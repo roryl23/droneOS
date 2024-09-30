@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 # install build dependencies
+sudo snap install go
 sudo apt install -y \
   bc \
   bison \
@@ -11,13 +12,19 @@ sudo apt install -y \
   libncurses5-dev \
   crossbuild-essential-arm64 \
   crossbuild-essential-armhf \
-  qemu-user-static
+  qemu-user-static && \
 
 # create build directory
 mkdir -p build/droneOS
 
-# install joystick dependencies
 cd build
+# tinygo
+if [[ ! -f "tinygo_0.33.0_amd64.deb" ]]; then
+  wget https://github.com/tinygo-org/tinygo/releases/download/v0.33.0/tinygo_0.33.0_amd64.deb
+fi
+sudo dpkg -i tinygo_0.33.0_amd64.deb
+
+# install joystick dependencies
 if [[ ! -f "SDL2-2.0.8.tar.gz" ]]; then
   wget https://www.libsdl.org/release/SDL2-2.0.8.tar.gz
 fi
