@@ -3,6 +3,7 @@ package base
 import (
 	"droneOS/internal/config"
 	"droneOS/internal/protocol"
+	"droneOS/internal/utils"
 	"encoding/json"
 	"fmt"
 	log "github.com/sirupsen/logrus"
@@ -18,11 +19,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Debugf("%+v", msg)
 
-	output, err := callFunctionByName(msg)
+	output, err := utils.CallFunctionByName(BaseFuncMap, msg.Cmd, nil)
 	if err != nil {
 		log.Fatal(err)
 	} else {
-		data, err := json.Marshal(output.Interface())
+		data, err := json.Marshal(output)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -46,4 +47,16 @@ func Main(s *config.Config) {
 			nil,
 		),
 	)
+
+	// initialize joystick
+	go func() {
+		_, err := utils.CallFunctionByName(
+			BaseFuncMap,
+			s.Base.Joystick,
+			&sensorEventChannels,
+		)
+		if err != nil {
+			log.Error(err)
+		}
+	}()
 }
