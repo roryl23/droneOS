@@ -18,16 +18,20 @@ var funcMap = map[string]interface{}{
 func main() {
 	log.SetFormatter(&log.JSONFormatter{})
 	log.SetLevel(log.DebugLevel)
-	log.Info("started droneOS")
 
 	mode := flag.String("mode", "base", "[base, drone]")
+	log.Info("mode: ", *mode)
 	configFile := flag.String("config-file", "configs/config.yaml", "config file location")
 	flag.Parse()
 	settings := config.GetConfig(*configFile)
 	log.Info(settings)
 
 	chips := gpio.Init()
-	log.Info("Available chips: ", chips)
+	log.Info("available chips: ", chips)
 
-	log.Fatal(utils.CallFunctionByName(funcMap, *mode, &settings))
+	log.Info("started droneOS")
+	result, err := utils.CallFunctionByName(funcMap, *mode, &settings)
+	if err != nil {
+		log.Fatal("result: ", result, " error: ", err)
+	}
 }

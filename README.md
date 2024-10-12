@@ -8,15 +8,11 @@ A Go framework for remotely and automatically flying a drone.
 
 * You'll need one RPi for the drone. 
   To make your life easiest, get the newest RPi Zero
-* You have two choices of base station; PC or another RPi
-  * If you use a PC:
-    * You'll need a radio communication module that plugs in via USB
-    * Joystick
-  * If you use an RPi:
-    * WiFi card, unless you disable WiFi communication for your setup
-    * Screen
-    * Keyboard
-    * Joystick
+* You need a PC for the base station
+  * Technically, you can run this wherever you can get the software/hardware to work,
+    which is left as an exercise for the reader.
+  * You'll need a radio communication module that plugs in via USB
+  * Joystick supported by gobot
 
 ### Software
 

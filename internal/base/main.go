@@ -40,97 +40,36 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func Main(s *config.Config) {
-	http.HandleFunc("/", handler)
-
-	log.Infof("HTTP server listening on port %d", s.Base.Port)
-	log.Fatal(
-		http.ListenAndServe(
-			fmt.Sprintf("%s:%d", s.Base.Host, s.Base.Port),
-			nil,
-		),
-	)
-
-	// TODO: this initialization should be generalized
-	//       to allow user defined joystick code
 	// initialize joystick
-	go func() {
-		joystickAdaptor := joystick.NewAdaptor()
-		stick := joystick.NewDriver(joystickAdaptor, s.Base.Joystick)
+	log.Info("initialize joystick")
+	joystickAdaptor := joystick.NewAdaptor()
+	err := joystickAdaptor.Connect()
+	if err != nil {
+		log.Fatal("failed to connect to joystick: ", err)
+	}
+	j := joystick.NewDriver(joystickAdaptor, s.Base.Joystick)
+	//j := joystick.NewDriver(joystickAdaptor, "./platforms/joystick/configs/xbox360_power_a_mini_proex.json")
 
-		work := func() {
-			// buttons
-			stick.On(joystick.SquarePress, func(data interface{}) {
-				fmt.Println("square_press")
-			})
-			stick.On(joystick.SquareRelease, func(data interface{}) {
-				fmt.Println("square_release")
-			})
-			stick.On(joystick.TrianglePress, func(data interface{}) {
-				fmt.Println("triangle_press")
-			})
-			stick.On(joystick.TriangleRelease, func(data interface{}) {
-				fmt.Println("triangle_release")
-			})
-			stick.On(joystick.CirclePress, func(data interface{}) {
-				fmt.Println("circle_press")
-			})
-			stick.On(joystick.CircleRelease, func(data interface{}) {
-				fmt.Println("circle_release")
-			})
-			stick.On(joystick.XPress, func(data interface{}) {
-				fmt.Println("x_press")
-			})
-			stick.On(joystick.XRelease, func(data interface{}) {
-				fmt.Println("x_release")
-			})
-			stick.On(joystick.StartPress, func(data interface{}) {
-				fmt.Println("start_press")
-			})
-			stick.On(joystick.StartRelease, func(data interface{}) {
-				fmt.Println("start_release")
-			})
-			stick.On(joystick.SelectPress, func(data interface{}) {
-				fmt.Println("select_press")
-			})
-			stick.On(joystick.SelectRelease, func(data interface{}) {
-				fmt.Println("select_release")
-			})
+	work := func() {
+		// buttons
+		j.On(joystick.APress, func(data interface{}) {
+			log.Info("a press")
+		})
+		j.On(joystick.ARelease, func(data interface{}) {
+			log.Info("a release")
+		})
+	}
+	robot := gobot.NewRobot("joystickBot",
+		[]gobot.Connection{joystickAdaptor},
+		[]gobot.Device{j},
+		work,
+	)
+	go robot.Start()
 
-			// joysticks
-			stick.On(joystick.LeftX, func(data interface{}) {
-				fmt.Println("left_x", data)
-			})
-			stick.On(joystick.LeftY, func(data interface{}) {
-				fmt.Println("left_y", data)
-			})
-			stick.On(joystick.RightX, func(data interface{}) {
-				fmt.Println("right_x", data)
-			})
-			stick.On(joystick.RightY, func(data interface{}) {
-				fmt.Println("right_y", data)
-			})
-
-			// triggers
-			stick.On(joystick.R1Press, func(data interface{}) {
-				fmt.Println("R1Press", data)
-			})
-			stick.On(joystick.R2Press, func(data interface{}) {
-				fmt.Println("R2Press", data)
-			})
-			stick.On(joystick.L1Press, func(data interface{}) {
-				fmt.Println("L1Press", data)
-			})
-			stick.On(joystick.L2Press, func(data interface{}) {
-				fmt.Println("L2Press", data)
-			})
-		}
-
-		robot := gobot.NewRobot("joystickBot",
-			[]gobot.Connection{joystickAdaptor},
-			[]gobot.Device{stick},
-			work,
-		)
-
-		robot.Start()
-	}()
+	http.HandleFunc("/", handler)
+	log.Infof("HTTP server listening on port %d", s.Base.Port)
+	log.Fatal(http.ListenAndServe(
+		fmt.Sprintf("%s:%d", s.Base.Host, s.Base.Port),
+		nil,
+	))
 }
