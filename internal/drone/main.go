@@ -3,7 +3,7 @@ package drone
 // github.com/thinkski/go-v4l2
 import (
 	"droneOS/internal/config"
-	"droneOS/internal/control"
+	"droneOS/internal/drone/control"
 	"droneOS/internal/input/sensor"
 	"droneOS/internal/output"
 	"droneOS/internal/utils"

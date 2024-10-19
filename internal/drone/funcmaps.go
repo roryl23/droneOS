@@ -1,8 +1,8 @@
 package drone
 
 import (
-	"droneOS/internal/control/obstacle_avoidance"
-	"droneOS/internal/control/pilot"
+	"droneOS/internal/drone/control/obstacle_avoidance"
+	"droneOS/internal/drone/control/pilot"
 	"droneOS/internal/input/sensor/plugin/GT_U7"
 	"droneOS/internal/input/sensor/plugin/HC_SR04"
 	"droneOS/internal/input/sensor/plugin/MPU_6050"

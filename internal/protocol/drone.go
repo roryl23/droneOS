@@ -10,6 +10,7 @@ import (
 	"net/http"
 )
 
+// CheckWiFi Request base to determine whether the WiFi connection is operational
 func CheckWiFi(s *config.Config, c http.Client) (bool, error) {
 	msg := Message{
 		ID:  s.Drone.ID,

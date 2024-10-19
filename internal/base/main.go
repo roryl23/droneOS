@@ -3,41 +3,12 @@ package base
 import (
 	"droneOS/internal/config"
 	"droneOS/internal/protocol"
-	"droneOS/internal/utils"
-	"encoding/json"
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"gobot.io/x/gobot"
 	"gobot.io/x/gobot/platforms/joystick"
-	"net/http"
+	"net"
 )
-
-func handler(w http.ResponseWriter, r *http.Request) {
-	var msg protocol.Message
-	err := json.NewDecoder(r.Body).Decode(&msg)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	log.Debugf("%+v", msg)
-
-	output, err := utils.CallFunctionByName(BaseFuncMap, msg.Cmd, nil)
-	if err != nil {
-		log.Fatal(err)
-	} else {
-		data, err := json.Marshal(output)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		_, err = w.Write(data)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
-}
 
 func Main(s *config.Config) {
 	// initialize joystick
@@ -47,13 +18,14 @@ func Main(s *config.Config) {
 	if err != nil {
 		log.Fatal("failed to connect to joystick: ", err)
 	}
+	defer joystickAdaptor.Finalize()
 	j := joystick.NewDriver(joystickAdaptor, s.Base.Joystick)
-	//j := joystick.NewDriver(joystickAdaptor, "./platforms/joystick/configs/xbox360_power_a_mini_proex.json")
 
 	work := func() {
 		// buttons
 		j.On(joystick.APress, func(data interface{}) {
-			log.Info("a press")
+			log.Info("a release")
+			// TODO: send over the wire to drone
 		})
 		j.On(joystick.ARelease, func(data interface{}) {
 			log.Info("a release")
@@ -66,10 +38,20 @@ func Main(s *config.Config) {
 	)
 	go robot.Start()
 
-	http.HandleFunc("/", handler)
-	log.Infof("HTTP server listening on port %d", s.Base.Port)
-	log.Fatal(http.ListenAndServe(
-		fmt.Sprintf("%s:%d", s.Base.Host, s.Base.Port),
-		nil,
-	))
+	// Start TCP server
+	addr := fmt.Sprintf("%s:%d", s.Base.Host, s.Base.Port)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalf("error starting TCP server: %v", err)
+	}
+	defer listener.Close()
+	log.Infof("TCP server listening on %s", addr)
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Errorf("error accepting connection: %v", err)
+		}
+		protocol.TCPHandler(conn)
+	}()
 }
