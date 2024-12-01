@@ -36,7 +36,12 @@ func Main(s *config.Config) {
 		[]gobot.Device{j},
 		work,
 	)
-	go robot.Start()
+	go func() {
+		err := robot.Start()
+		if err != nil {
+			log.Fatal("failed to start robot: ", err)
+		}
+	}()
 
 	// Start TCP server
 	addr := fmt.Sprintf("%s:%d", s.Base.Host, s.Base.Port)
@@ -47,11 +52,11 @@ func Main(s *config.Config) {
 	defer listener.Close()
 	log.Infof("TCP server listening on %s", addr)
 
-	go func() {
+	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			log.Errorf("error accepting connection: %v", err)
 		}
 		protocol.TCPHandler(conn)
-	}()
+	}
 }
