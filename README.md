@@ -2,6 +2,8 @@
 
 A Go framework for remotely and automatically flying a drone.
 
+NOTE: This project is unstable and currently under development
+
 ## Usage
 
 ### Hardware
