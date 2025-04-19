@@ -5,7 +5,7 @@ import (
 	"droneOS/internal/drone/control"
 	"droneOS/internal/input/sensor"
 	"droneOS/internal/output"
-	log "github.com/sirupsen/logrus"
+	"github.com/rs/zerolog/log"
 	"math/rand"
 	"time"
 )
@@ -21,10 +21,10 @@ func Main(
 		time.Sleep(time.Duration(rand.Intn(200-100+1)+100) * time.Millisecond)
 		priorityMutex.Lock(priority)
 
-		log.Info("control algorithm pilot running")
+		log.Info().Msg("control algorithm pilot running")
 		time.Sleep(time.Duration(rand.Intn(200-100+1)+100) * time.Millisecond)
 
 		priorityMutex.Unlock()
-		log.Info("control algorithm pilot finished")
+		log.Info().Msg("control algorithm pilot finished")
 	}
 }

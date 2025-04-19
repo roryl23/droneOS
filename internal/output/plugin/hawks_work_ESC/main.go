@@ -3,7 +3,7 @@ package hawks_work_ESC
 import (
 	"droneOS/internal/config"
 	"droneOS/internal/output"
-	log "github.com/sirupsen/logrus"
+	"github.com/rs/zerolog/log"
 	"time"
 )
 
@@ -13,7 +13,7 @@ func Main(
 ) error {
 	for {
 		task := <-*taskQueue
-		log.Info("task: ", task)
+		log.Info().Interface("task", task)
 
 		time.Sleep(500 * time.Millisecond)
 	}

@@ -1,7 +1,7 @@
 package config
 
 import (
-	log "github.com/sirupsen/logrus"
+	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 	"io"
 	"os"
@@ -42,19 +42,19 @@ type Config struct {
 func GetConfig(file string) Config {
 	handle, err := os.Open(file)
 	if err != nil {
-		log.Fatalf("failed to open file: %s", err)
+		log.Fatal().Err(err).Msg("failed to open file")
 	}
 	defer handle.Close()
 
 	content, err := io.ReadAll(handle)
 	if err != nil {
-		log.Fatalf("failed to read file: %s", err)
+		log.Fatal().Err(err).Msg("failed to read file")
 	}
 
 	c := Config{}
 	err = yaml.Unmarshal(content, &c)
 	if err != nil {
-		log.Error(err)
+		log.Error().Err(err)
 	}
 
 	return c

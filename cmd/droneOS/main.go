@@ -7,7 +7,8 @@ import (
 	"droneOS/internal/gpio"
 	"droneOS/internal/utils"
 	"flag"
-	log "github.com/sirupsen/logrus"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 var funcMap = map[string]interface{}{
@@ -16,22 +17,21 @@ var funcMap = map[string]interface{}{
 }
 
 func main() {
-	log.SetFormatter(&log.JSONFormatter{})
-	log.SetLevel(log.DebugLevel)
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
 	mode := flag.String("mode", "base", "[base, drone]")
-	log.Info("mode: ", *mode)
+	log.Info().Str("mode", *mode)
 	configFile := flag.String("config-file", "configs/config.yaml", "config file location")
 	flag.Parse()
 	settings := config.GetConfig(*configFile)
-	log.Info(settings)
+	log.Info().Interface("settings", settings)
 
 	chips := gpio.Init()
-	log.Info("available chips: ", chips)
+	log.Info().Interface("chips", chips)
 
-	log.Info("started droneOS")
+	log.Info().Msg("started droneOS")
 	result, err := utils.CallFunctionByName(funcMap, *mode, &settings)
 	if err != nil {
-		log.Fatal("result: ", result, " error: ", err)
+		log.Fatal().Err(err).Interface("result", result)
 	}
 }

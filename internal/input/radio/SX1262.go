@@ -1,7 +1,7 @@
 package radio
 
 import (
-	log "github.com/sirupsen/logrus"
+	"github.com/rs/zerolog/log"
 	"tinygo.org/x/drivers/lora"
 )
 
@@ -19,5 +19,5 @@ func Init() {
 		Iq:             0,
 		LoraTxPowerDBm: 0,
 	}
-	log.Info("sx1262 init", sxdriver)
+	log.Info().Interface("sx1262", sxdriver)
 }

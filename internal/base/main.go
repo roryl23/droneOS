@@ -4,7 +4,7 @@ import (
 	"droneOS/internal/config"
 	"droneOS/internal/protocol"
 	"fmt"
-	log "github.com/sirupsen/logrus"
+	"github.com/rs/zerolog/log"
 	"gobot.io/x/gobot"
 	"gobot.io/x/gobot/platforms/joystick"
 	"net"
@@ -12,11 +12,11 @@ import (
 
 func Main(s *config.Config) {
 	// initialize joystick
-	log.Info("initialize joystick")
+	log.Info().Msg("initialize joystick")
 	joystickAdaptor := joystick.NewAdaptor()
 	err := joystickAdaptor.Connect()
 	if err != nil {
-		log.Fatal("failed to connect to joystick: ", err)
+		log.Warn().Err(err).Msg("failed to connect to joystick")
 	}
 	defer joystickAdaptor.Finalize()
 	j := joystick.NewDriver(joystickAdaptor, s.Base.Joystick)
@@ -24,11 +24,11 @@ func Main(s *config.Config) {
 	work := func() {
 		// buttons
 		j.On(joystick.APress, func(data interface{}) {
-			log.Info("a release")
+			log.Info().Msg("a release")
 			// TODO: send over the wire to drone
 		})
 		j.On(joystick.ARelease, func(data interface{}) {
-			log.Info("a release")
+			log.Info().Msg("a release")
 		})
 	}
 	robot := gobot.NewRobot("joystickBot",
@@ -39,7 +39,7 @@ func Main(s *config.Config) {
 	go func() {
 		err := robot.Start()
 		if err != nil {
-			log.Fatal("failed to start robot: ", err)
+			log.Fatal().Err(err).Msg("failed to start robot")
 		}
 	}()
 
@@ -47,15 +47,15 @@ func Main(s *config.Config) {
 	addr := fmt.Sprintf("%s:%d", s.Base.Host, s.Base.Port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatalf("error starting TCP server: %v", err)
+		log.Fatal().Err(err).Msg("error starting TCP server")
 	}
 	defer listener.Close()
-	log.Infof("TCP server listening on %s", addr)
+	log.Info().Str("addr", addr).Msg("TCP server listening")
 
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Errorf("error accepting connection: %v", err)
+			log.Error().Err(err).Msg("error accepting connection")
 		}
 		protocol.TCPHandler(conn)
 	}

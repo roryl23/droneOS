@@ -3,7 +3,7 @@ package MPU_6050
 import (
 	"droneOS/internal/config"
 	"droneOS/internal/input/sensor"
-	log "github.com/sirupsen/logrus"
+	"github.com/rs/zerolog/log"
 	"gobot.io/x/gobot/drivers/i2c"
 	"gobot.io/x/gobot/platforms/raspi"
 	"time"
@@ -14,7 +14,7 @@ func Main(
 	eventCh *chan sensor.Event,
 ) {
 	rpi := raspi.NewAdaptor()
-	log.Info("rpi: ", rpi)
+	log.Info().Interface("rpi", rpi)
 
 	// default bus/address
 	d := i2c.NewMPU6050Driver(rpi)
@@ -23,7 +23,7 @@ func Main(
 	//d := i2c.NewMPU6050Driver(adaptor,
 	//	i2c.WithBus(0),
 	//	i2c.WithAddress(0x34))
-	log.Info("driver: ", d)
+	log.Info().Interface("driver", d)
 
 	for {
 		time.Sleep(500 * time.Millisecond)

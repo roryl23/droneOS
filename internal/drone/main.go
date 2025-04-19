@@ -7,7 +7,7 @@ import (
 	"droneOS/internal/input/sensor"
 	"droneOS/internal/output"
 	"droneOS/internal/utils"
-	log "github.com/sirupsen/logrus"
+	"github.com/rs/zerolog/log"
 	"math"
 	"runtime"
 	"runtime/debug"
@@ -35,7 +35,7 @@ func Main(s *config.Config) {
 				&sensorEventChannels,
 			)
 			if err != nil {
-				log.Error(err)
+				log.Error().Err(err).Msg("error calling sensor")
 			}
 		}()
 	}
@@ -55,7 +55,7 @@ func Main(s *config.Config) {
 				&taskQueue,
 			)
 			if err != nil {
-				log.Error(err)
+				log.Error().Err(err).Msg("error calling control algorithm")
 			}
 		}()
 	}
@@ -74,7 +74,7 @@ func Main(s *config.Config) {
 						&taskQueue,
 					)
 					if err != nil {
-						log.Error(err)
+						log.Error().Err(err).Msg("error calling output")
 					}
 				}()
 			}
