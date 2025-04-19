@@ -31,7 +31,7 @@ func Main(s *config.Config) {
 			_, err := utils.CallFunctionByName(
 				SensorFuncMap,
 				device.Name,
-				s.Drone.Sensors[index],
+				&s.Drone.Sensors[index],
 				&sensorEventChannels,
 			)
 			if err != nil {
