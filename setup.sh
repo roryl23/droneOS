@@ -25,12 +25,4 @@ fi
 sudo dpkg -i tinygo_0.33.0_amd64.deb
 
 # install joystick dependencies
-if [[ ! -f "SDL2-2.0.8.tar.gz" ]]; then
-  wget https://www.libsdl.org/release/SDL2-2.30.9.tar.gz
-fi
-if [[ ! -d "SDL2-2.0.8" ]]; then
-  tar -zxvf SDL2-2.30.9.tar.gz
-fi
-cd SDL2-2.30.9/ && \
-./configure && make && sudo make install && \
-cd ../..
+brew install sdl2

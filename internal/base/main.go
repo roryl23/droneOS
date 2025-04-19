@@ -24,7 +24,7 @@ func Main(s *config.Config) {
 	work := func() {
 		// buttons
 		j.On(joystick.APress, func(data interface{}) {
-			log.Info().Msg("a release")
+			log.Info().Msg("a press")
 			// TODO: send over the wire to drone
 		})
 		j.On(joystick.ARelease, func(data interface{}) {
