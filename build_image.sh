@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # usage:
-# bash build_image.sh sd# kernel base username userpassword ssid ssidpassword
+# bash build_image.sh sd# kernel drone username userpassword ssid ssidpassword
 
 # input parameters
 # lsblk will let you find the value for this parameter:
@@ -112,7 +112,9 @@ PASSWORD_ENCRYPTED=$(echo "$USER_PASSWORD" | openssl passwd -6 -stdin)
 echo "${USER_NAME}:${PASSWORD_ENCRYPTED}" | sudo tee "${SD_CARD_BOOT_DIR}"/userconf.txt && \
 sudo mkdir -p "${SD_CARD_ROOT_DIR}"/home/"${USER_NAME}" && \
 # set home directory permissions
-sudo chown -Rv "${USER_NAME}":"${USER_NAME}" "$SD_CARD_ROOT_DIR"/home/"${USER_NAME}"
+sudo chown -Rv "${USER_NAME}":"${USER_NAME}" "$SD_CARD_ROOT_DIR"/home/"${USER_NAME}" && \
+# enable ssh
+sudo touch "${SD_CARD_BOOT_DIR}"/firmware/ssh
 
 echo "setting up wifi network..."
 if [[ $TYPE == "base" ]]; then
