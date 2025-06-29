@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # usage:
-# bash build_image.sh sd# kernel drone username userpassword ssid ssidpassword
+# bash build_image.sh sd# kernel8 drone username userpassword ssid ssidpassword
 
 # input parameters
 # lsblk will let you find the value for this parameter:
@@ -9,7 +9,7 @@ SD_CARD=${1:-""}
 # [kernel, kernel7l, kernel8]
 KERNEL=${2:-"kernel"}
 # [base, drone]
-TYPE=${3:-"base"}
+TYPE=${3:-"drone"}
 # login user
 USER_NAME=${4:-"admin"}
 USER_PASSWORD=${5:-"adminpassword"}
@@ -18,7 +18,7 @@ SSID=${6:-"droneos"}
 SSID_PASSWORD=${7:-"X0YhW2Wy2bmtKXkT2ST61v2SdBk4FGgE"}
 
 # local variables
-THREADS=8
+THREADS=4
 PROJECT_DIR=$PWD
 BUILD_DIR=$PROJECT_DIR/build
 RPI_LINUX_BRANCH=rpi-6.6.y
@@ -26,7 +26,7 @@ SD_CARD_BOOT_DEVICE="${SD_CARD}1"
 SD_CARD_ROOT_DEVICE="${SD_CARD}2"
 SD_CARD_BOOT_DIR=$BUILD_DIR/linux/mnt/rpi_boot
 SD_CARD_ROOT_DIR=$BUILD_DIR/linux/mnt/rpi_root
-INSTALL_DIR=$SD_CARD_ROOT_DIR/opt/droneOS
+INSTALL_DIR=${SD_CARD_ROOT_DIR}/opt/droneOS
 if [[ $KERNEL == "kernel8" ]]; then
   ARM=aarch64
 else
@@ -112,9 +112,9 @@ PASSWORD_ENCRYPTED=$(echo "$USER_PASSWORD" | openssl passwd -6 -stdin)
 echo "${USER_NAME}:${PASSWORD_ENCRYPTED}" | sudo tee "${SD_CARD_BOOT_DIR}"/userconf.txt && \
 sudo mkdir -p "${SD_CARD_ROOT_DIR}"/home/"${USER_NAME}" && \
 # set home directory permissions
-sudo chown -Rv "${USER_NAME}":"${USER_NAME}" "$SD_CARD_ROOT_DIR"/home/"${USER_NAME}" && \
+#sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/chown -Rv "${USER_NAME}":"${USER_NAME}" "${SD_CARD_ROOT_DIR}"/home/"${USER_NAME}"
 # enable ssh
-sudo touch "${SD_CARD_BOOT_DIR}"/firmware/ssh
+sudo touch "${SD_CARD_BOOT_DIR}"/ssh
 
 echo "setting up wifi network..."
 if [[ $TYPE == "base" ]]; then
@@ -133,23 +133,25 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 )
-  echo "$UNIT_FILE" | sudo tee "$SD_CARD_ROOT_DIR"/etc/systemd/system/droneOSNetwork.service
+  echo "$UNIT_FILE" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/systemd/system/droneOSNetwork.service
   # chroot to filesystem and enable wifi startup script
-  sudo cp /usr/bin/qemu-${ARM}-static "$SD_CARD_ROOT_DIR"/usr/bin/ && \
-  sudo chroot "$SD_CARD_ROOT_DIR" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOSNetwork.service'
+  sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/ && \
+  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOSNetwork.service'
 elif [[ $TYPE == "drone" ]]; then
+  UUID=$(uuidgen)
   sudo mkdir -p "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections
 NM_FILE=$(cat <<EOF
 [connection]
-id=${SSID}
-uuid=
+id=droneOS
+uuid=${UUID}
 type=wifi
 interface-name=wlan0
 autoconnect=true
+autoconnect-retries=0
 
 [wifi]
 mode=infrastructure
-ssid="${SSID}"
+ssid=${SSID}
 
 [wifi-security]
 auth-alg=open
@@ -205,14 +207,14 @@ fi
 
 echo "building droneOS binary..."
 if [[ $ARM == "aarch64" ]]; then
-  bash build.sh arm64
+  bash build.sh ${TYPE} arm64
 elif [[ $ARM == "arm" ]]; then
-  bash build.sh arm
+  bash build.sh ${TYPE} arm
 fi
 # install droneOS binary and config
 echo "installing droneOS binary and config..."
 sudo mkdir -p "$INSTALL_DIR" && \
-sudo cp build/droneOS/* "$INSTALL_DIR" && \
+sudo cp ${TYPE}.bin "$INSTALL_DIR" && \
 sudo cp configs/config.yaml "$INSTALL_DIR"
 
 echo "setting up systemd unit file..."
@@ -226,7 +228,7 @@ After=droneOSNetwork.service
 [Service]
 Type=notify
 WorkingDirectory=/opt/droneOS/
-ExecStart=/opt/droneOS/droneOS.bin --config-file config.yaml
+ExecStart=/opt/droneOS/base.bin --config-file config.yaml
 ExecReload=/bin/kill -s HUP $MAINPID
 TimeoutStartSec=0
 RestartSec=1
@@ -246,7 +248,7 @@ After=network-online.service
 [Service]
 Type=notify
 WorkingDirectory=/opt/droneOS/
-ExecStart=/opt/droneOS/droneOS.bin --config-file config.yaml
+ExecStart=/opt/droneOS/drone.bin --config-file config.yaml
 ExecReload=/bin/kill -s HUP $MAINPID
 TimeoutStartSec=0
 RestartSec=1

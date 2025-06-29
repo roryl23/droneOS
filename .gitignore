@@ -10,7 +10,9 @@ build/
 *.bin
 
 droneOS_base
+base.bin
 droneOS_drone
+drone.bin
 plugin_*
 
 venv/

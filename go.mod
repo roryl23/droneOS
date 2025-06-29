@@ -20,7 +20,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sigurn/crc8 v0.0.0-20160107002456-e55481d6f45c // indirect
 	github.com/sigurn/utils v0.0.0-20190728110027-e1fefb11a144 // indirect
-	github.com/veandco/go-sdl2 v0.3.3 // indirect
+	github.com/veandco/go-sdl2 v0.4.40 // indirect
 	golang.org/x/sys v0.32.0 // indirect
 	periph.io/x/periph v3.6.2+incompatible // indirect
 )

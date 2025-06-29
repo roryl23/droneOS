@@ -9,10 +9,11 @@ NOTE: This project is unstable and currently under development
 ### Hardware
 
 * You'll need one RPi for the drone. 
-  To make your life easiest, get the newest RPi Zero
-* You need a PC for the base station
+  To make your life easiest, get the newest RPi Zero 2 W
+* Realistically, you'll need a PC for the base station
   * Technically, you can run this wherever you can get the software/hardware to work,
-    which is left as an exercise for the reader.
+    which is left as an exercise for the reader. I will say that cross-compiling SDL2
+    is extremely annoying and doesn't work right now because I'm a scrub.
   * You'll need a radio communication module that plugs in via USB
   * Joystick supported by gobot
 
@@ -20,9 +21,9 @@ NOTE: This project is unstable and currently under development
 
 * Install build dependencies: `bash setup.sh`
 * For each RPi, insert your SD card and run `lsblk` to find which `/dev/sd#` file it is
-  * NOTE: running `lsblk` is important! Choosing the wrong drive will wreck the data!
+  * NOTE: running `lsblk` is important! Choosing the wrong drive will instantly wreck the filesystem!
 * Unmount the SD card if it's mounted: `sudo umount /dev/sd#1 && sudo umount /dev/sd#2`
-* Build the image like this: `bash build_image.sh sd# kernel base username userpassword ssid ssidpassword`,
+* Build the image like this: `bash build_image.sh sd# kernel8 drone username userpassword ssid ssidpassword`,
   changing the parameters for your case.
   * See the `build_image.sh` file for details on the parameter values
 

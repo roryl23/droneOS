@@ -1,13 +1,12 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="base" type="GoApplicationRunConfiguration" factoryName="Go Application">
     <module name="droneOS" />
-    <working_directory value="$PROJECT_DIR$/build/droneOS" />
-    <parameters value="--mode base --config-file ../../configs/config.yaml" />
+    <working_directory value="$PROJECT_DIR$" />
+    <parameters value="--config-file ./configs/config.yaml" />
     <kind value="FILE" />
     <package value="droneOS" />
     <directory value="$PROJECT_DIR$" />
-    <filePath value="$PROJECT_DIR$/cmd/droneOS/main.go" />
-    <output_directory value="$PROJECT_DIR$/build/droneOS" />
+    <filePath value="$PROJECT_DIR$/cmd/base/main.go" />
     <method v="2" />
   </configuration>
 </component>
