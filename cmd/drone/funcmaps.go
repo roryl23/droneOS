@@ -1,4 +1,4 @@
-package drone
+package main
 
 import (
 	"droneOS/internal/drone/control/obstacle_avoidance"
