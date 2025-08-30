@@ -2,7 +2,7 @@ package MPU_6050
 
 import (
 	"droneOS/internal/config"
-	"droneOS/internal/input/sensor"
+	"droneOS/internal/drone/input/sensor"
 	"github.com/rs/zerolog/log"
 	"gobot.io/x/gobot/drivers/i2c"
 	"gobot.io/x/gobot/platforms/raspi"

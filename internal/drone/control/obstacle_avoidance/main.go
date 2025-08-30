@@ -3,8 +3,8 @@ package obstacle_avoidance
 import (
 	"droneOS/internal/config"
 	"droneOS/internal/drone/control"
-	"droneOS/internal/input/sensor"
-	"droneOS/internal/output"
+	"droneOS/internal/drone/input/sensor"
+	"droneOS/internal/drone/output"
 	log "github.com/sirupsen/logrus"
 	"math/rand"
 	"time"

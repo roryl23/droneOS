@@ -8,9 +8,9 @@ import (
 )
 
 type BaseConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	Joystick string `yaml:"joystick"`
+	Host       string `yaml:"host"`
+	Port       int    `yaml:"port"`
+	Controller string `yaml:"controller"`
 }
 
 type Device struct {

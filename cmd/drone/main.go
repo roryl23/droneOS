@@ -3,23 +3,27 @@ package main
 import (
 	"droneOS/internal/config"
 	"droneOS/internal/drone/control"
+	"droneOS/internal/drone/input/sensor"
+	"droneOS/internal/drone/output"
 	"droneOS/internal/gpio"
-	"droneOS/internal/input/sensor"
-	"droneOS/internal/output"
 	"droneOS/internal/utils"
 	"flag"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"math"
 	"runtime"
 	"runtime/debug"
-	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
-	configFile := flag.String("config-file", "configs/config.yaml", "config file location")
+	configFile := flag.String(
+		"config-file",
+		"configs/config.yaml",
+		"config file location",
+	)
 	flag.Parse()
 	settings := config.GetConfig(*configFile)
 	log.Info().Interface("settings", settings)
@@ -92,8 +96,6 @@ func main() {
 				}()
 			}
 		}
-
 		runtime.GC()
-		time.Sleep(500 * time.Millisecond)
 	}
 }

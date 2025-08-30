@@ -1,56 +1,47 @@
 package main
 
 import (
+	"droneOS/internal/base/controller"
 	"droneOS/internal/config"
 	"droneOS/internal/protocol"
+	"droneOS/internal/utils"
 	"flag"
 	"fmt"
+	"net"
+
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"gobot.io/x/gobot"
-	"gobot.io/x/gobot/platforms/joystick"
-	"net"
 )
 
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
-	configFile := flag.String("config-file", "configs/config.yaml", "config file location")
+	configFile := flag.String(
+		"config-file",
+		"configs/config.yaml",
+		"config file location",
+	)
 	flag.Parse()
 	settings := config.GetConfig(*configFile)
 	log.Info().Interface("settings", settings)
 
-	// initialize joystick
-	log.Info().Msg("initialize joystick")
-	joystickAdaptor := joystick.NewAdaptor()
-	err := joystickAdaptor.Connect()
-	if err != nil {
-		log.Warn().Err(err).Msg("failed to connect to joystick")
-	}
-	defer joystickAdaptor.Finalize()
-	j := joystick.NewDriver(joystickAdaptor, settings.Base.Joystick)
-
-	work := func() {
-		// buttons
-		j.On(joystick.APress, func(data interface{}) {
-			log.Info().Msg("a press")
-			// TODO: send over the wire to drone
-		})
-		j.On(joystick.ARelease, func(data interface{}) {
-			log.Info().Msg("a release")
-		})
-	}
-	robot := gobot.NewRobot("joystickBot",
-		[]gobot.Connection{joystickAdaptor},
-		[]gobot.Device{j},
-		work,
-	)
+	// initialize generic controller interface and handler
+	controllerChannel := make(chan controller.Event[any])
 	go func() {
-		err := robot.Start()
+		output, err := utils.CallFunctionByName(
+			controller.FuncMap,
+			settings.Base.Controller,
+			&controllerChannel,
+		)
 		if err != nil {
-			log.Fatal().Err(err).Msg("failed to start robot")
+			log.Error().
+				Err(err).
+				Interface("output", output).
+				Msg("error initializing controller")
+			return
 		}
 	}()
+	go controller.EventHandler(controllerChannel)
 
 	// Start TCP server
 	addr := fmt.Sprintf("%s:%d", settings.Base.Host, settings.Base.Port)

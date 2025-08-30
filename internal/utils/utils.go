@@ -6,7 +6,7 @@ import (
 	"reflect"
 )
 
-// CallFunctionByName Helper function to call a function by its name from the map
+// CallFunctionByName Helper function to call a function by name from the map
 func CallFunctionByName(funcMap map[string]interface{}, name string, inputs ...interface{}) ([]reflect.Value, error) {
 	fn, ok := funcMap[name]
 	if !ok {

@@ -28,7 +28,7 @@ if [[ ! -f "tinygo_${TINYGO_VERSION}_amd64.deb" ]]; then
 fi
 sudo dpkg -i tinygo_${TINYGO_VERSION}_amd64.deb
 
-# install joystick dependencies
+# install controller dependencies
 if [[ ! -f "SDL2-${SDL2_VERSION}.tar.gz" ]]; then
   wget https://www.libsdl.org/release/SDL2-${SDL2_VERSION}.tar.gz
 fi

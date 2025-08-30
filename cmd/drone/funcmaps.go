@@ -3,12 +3,12 @@ package main
 import (
 	"droneOS/internal/drone/control/obstacle_avoidance"
 	"droneOS/internal/drone/control/pilot"
-	"droneOS/internal/input/sensor/plugin/GT_U7"
-	"droneOS/internal/input/sensor/plugin/HC_SR04"
-	"droneOS/internal/input/sensor/plugin/MPU_6050"
-	"droneOS/internal/input/sensor/plugin/frienda_obstacle_431S"
-	"droneOS/internal/output/plugin/MG90S"
-	"droneOS/internal/output/plugin/hawks_work_ESC"
+	"droneOS/internal/drone/input/sensor/plugin/GT_U7"
+	"droneOS/internal/drone/input/sensor/plugin/HC_SR04"
+	"droneOS/internal/drone/input/sensor/plugin/MPU_6050"
+	"droneOS/internal/drone/input/sensor/plugin/frienda_obstacle_431S"
+	"droneOS/internal/drone/output/plugin/MG90S"
+	"droneOS/internal/drone/output/plugin/hawks_work_ESC"
 )
 
 var SensorFuncMap = map[string]interface{}{

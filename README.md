@@ -20,7 +20,12 @@ NOTE: This project is unstable and currently under development
 ### Software
 
 * Install build dependencies: `bash setup.sh`
-* For each RPi, insert your SD card and run `lsblk` to find which `/dev/sd#` file it is
+* For each RPi, insert your SD card and run `lsblk` to find which `/dev/sd#` file it is:
+```
+sdf           8:80   1  29.7G  0 disk 
+├─sdf1        8:81   1   512M  0 part /media/user/bootfs
+└─sdf2        8:82   1  29.2G  0 part /media/user/rootfs
+```
   * NOTE: running `lsblk` is important! Choosing the wrong drive will instantly wreck the filesystem!
 * Unmount the SD card if it's mounted: `sudo umount /dev/sd#1 && sudo umount /dev/sd#2`
 * Build the image like this: `bash build_image.sh sd# kernel8 drone username userpassword ssid ssidpassword`,

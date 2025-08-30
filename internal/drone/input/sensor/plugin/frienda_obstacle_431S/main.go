@@ -2,7 +2,7 @@ package frienda_obstacle_431S
 
 import (
 	"droneOS/internal/config"
-	"droneOS/internal/input/sensor"
+	"droneOS/internal/drone/input/sensor"
 	"time"
 )
 

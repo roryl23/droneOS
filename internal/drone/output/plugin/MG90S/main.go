@@ -1,9 +1,8 @@
-package hawks_work_ESC
+package MG90S
 
 import (
 	"droneOS/internal/config"
-	"droneOS/internal/output"
-	"github.com/rs/zerolog/log"
+	"droneOS/internal/drone/output"
 	"time"
 )
 
@@ -12,9 +11,7 @@ func Main(
 	taskQueue *chan output.Task,
 ) error {
 	for {
-		task := <-*taskQueue
-		log.Info().Interface("task", task)
-
+		//log.Info("output plugin MG90S running. Input: ", i)
 		time.Sleep(500 * time.Millisecond)
 	}
 }
