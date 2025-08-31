@@ -30,8 +30,7 @@ func EventHandler(eCh chan Event[any]) {
 		case int16:
 			println("Action:", e.Action, "Payload:", v)
 		default:
-			println("Action:", e.Action, "Payload:", v)
-			log.Info().Str("addr", addr).Msg("TCP server listening")
+			log.Info().Str("action", e.Action).Interface("payload", v)
 		}
 	}
 }
