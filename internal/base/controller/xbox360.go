@@ -58,7 +58,7 @@ func Xbox360(cCh *chan Event[any]) {
 			} else {
 				log.Warn().
 					Interface("payload", data).
-					Msg("unexpected data type for LeftX")
+					Msg("unexpected data type for LeftY")
 			}
 		})
 		j.On(joystick.RightX, func(data interface{}) {
@@ -70,7 +70,7 @@ func Xbox360(cCh *chan Event[any]) {
 			} else {
 				log.Warn().
 					Interface("payload", data).
-					Msg("unexpected data type for LeftX")
+					Msg("unexpected data type for RightX")
 			}
 		})
 		j.On(joystick.RightY, func(data interface{}) {
@@ -82,7 +82,7 @@ func Xbox360(cCh *chan Event[any]) {
 			} else {
 				log.Warn().
 					Interface("payload", data).
-					Msg("unexpected data type for LeftX")
+					Msg("unexpected data type for RightY")
 			}
 		})
 	}
