@@ -5,7 +5,7 @@ import (
 	"droneOS/internal/drone/control"
 	"droneOS/internal/drone/input/sensor"
 	"droneOS/internal/drone/output"
-	log "github.com/sirupsen/logrus"
+	"github.com/rs/zerolog/log"
 	"math/rand"
 	"time"
 )
@@ -20,7 +20,7 @@ func Main(
 	motor := "hawks_work_ESC"
 	for {
 		sensorEvent := <-*sensorEvents
-		log.Info("sensorEvent: ", sensorEvent)
+		log.Info().Interface("sensorEvent", sensorEvent)
 
 		priorityMutex.Lock(priority)
 

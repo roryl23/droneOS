@@ -1,5 +1,7 @@
 package controller
 
+import "github.com/rs/zerolog/log"
+
 const (
 	MOVE_X          = "MOVE_X"
 	MOVE_Y          = "MOVE_Y"
@@ -24,10 +26,12 @@ func EventHandler(eCh chan Event[any]) {
 		// buttons
 		case bool:
 			println("Action:", e.Action, "Payload:", v)
+		// axes movement
 		case int16:
 			println("Action:", e.Action, "Payload:", v)
 		default:
 			println("Action:", e.Action, "Payload:", v)
+			log.Info().Str("addr", addr).Msg("TCP server listening")
 		}
 	}
 }

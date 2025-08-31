@@ -25,7 +25,7 @@ func main() {
 	settings := config.GetConfig(*configFile)
 	log.Info().Interface("settings", settings)
 
-	// initialize generic controller interface and handler
+	// initialize the configured controller interface and handler
 	controllerChannel := make(chan controller.Event[any])
 	go func() {
 		output, err := utils.CallFunctionByName(
