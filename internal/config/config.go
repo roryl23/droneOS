@@ -1,16 +1,18 @@
 package config
 
 import (
-	"github.com/rs/zerolog/log"
-	"gopkg.in/yaml.v3"
 	"io"
 	"os"
+
+	"github.com/rs/zerolog/log"
+	"gopkg.in/yaml.v3"
 )
 
 type BaseConfig struct {
 	Host       string `yaml:"host"`
 	Port       int    `yaml:"port"`
 	Controller string `yaml:"controller"`
+	Radio      string `yaml:"radio"`
 }
 
 type Device struct {

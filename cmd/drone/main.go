@@ -41,7 +41,6 @@ func main() {
 	for i := range sensorEventChannels {
 		sensorEventChannels[i] = make(chan sensor.Event)
 	}
-
 	for index, device := range settings.Drone.Sensors {
 		go func() {
 			_, err := utils.CallFunctionByName(
@@ -51,7 +50,8 @@ func main() {
 				&sensorEventChannels,
 			)
 			if err != nil {
-				log.Error().Err(err).Msg("error calling sensor")
+				log.Error().Err(err).
+					Msg("error calling sensor")
 			}
 		}()
 	}
@@ -71,7 +71,8 @@ func main() {
 				&taskQueue,
 			)
 			if err != nil {
-				log.Error().Err(err).Msg("error calling control algorithm")
+				log.Error().Err(err).
+					Msg("error calling control algorithm")
 			}
 		}()
 	}

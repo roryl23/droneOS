@@ -34,8 +34,7 @@ func main() {
 			&controllerChannel,
 		)
 		if err != nil {
-			log.Error().
-				Err(err).
+			log.Error().Err(err).
 				Interface("output", output).
 				Msg("error initializing controller")
 			return
@@ -47,15 +46,19 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", settings.Base.Host, settings.Base.Port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatal().Err(err).Msg("error starting TCP server")
+		log.Fatal().Err(err).
+			Msg("error starting TCP server")
 	}
 	defer listener.Close()
-	log.Info().Str("addr", addr).Msg("TCP server listening")
+	log.Info().
+		Str("addr", addr).
+		Msg("TCP server listening")
 
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Error().Err(err).Msg("error accepting connection")
+			log.Error().Err(err).
+				Msg("error accepting connection")
 		}
 		protocol.TCPHandler(conn)
 	}

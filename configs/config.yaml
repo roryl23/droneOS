@@ -2,6 +2,10 @@ base:
   host: 192.168.1.76
   port: 7000
   controller: xbox360
+  radio:
+    name: SX1262
+    alwaysUse: False
+    usbId: /dev/usb0
 drone:
   id: 1
   radio:

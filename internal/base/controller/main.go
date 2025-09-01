@@ -2,6 +2,10 @@ package controller
 
 import "github.com/rs/zerolog/log"
 
+// these constants are used to identify the actions
+// that can be performed by the controller,
+// providing an abstraction layer between arbitrary
+// controllers and the drone code.
 const (
 	MOVE_X          = "MOVE_X"
 	MOVE_Y          = "MOVE_Y"
@@ -25,12 +29,19 @@ func EventHandler(eCh chan Event[any]) {
 		switch v := e.Payload.(type) {
 		// buttons
 		case bool:
-			println("Action:", e.Action, "Payload:", v)
+			log.Info().
+				Str("action", e.Action).
+				Interface("payload", v)
 		// axes movement
 		case int16:
-			println("Action:", e.Action, "Payload:", v)
+			log.Info().
+				Str("action", e.Action).
+				Interface("payload", v)
 		default:
-			log.Info().Str("action", e.Action).Interface("payload", v)
+			log.Warn().
+				Str("action", e.Action).
+				Interface("payload", v).
+				Msg("unknown payload type")
 		}
 	}
 }

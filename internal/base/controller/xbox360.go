@@ -10,7 +10,7 @@ const (
 	JoystickName = "xbox360"
 )
 
-func Xbox360(cCh *chan Event[any]) {
+func Xbox360Interface(cCh *chan Event[any]) {
 	joystickAdaptor := joystick.NewAdaptor()
 	err := joystickAdaptor.Connect()
 	if err != nil {
