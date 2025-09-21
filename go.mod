@@ -4,10 +4,11 @@ go 1.23.0
 
 require (
 	github.com/rs/zerolog v1.34.0
+	github.com/stianeikeland/go-rpio/v4 v4.6.0
+	github.com/tarm/serial v0.0.0-20180830185346-98f6abe2eb07
 	github.com/warthog618/go-gpiocdev v0.9.0
 	gobot.io/x/gobot v1.16.0
 	gopkg.in/yaml.v3 v3.0.1
-	tinygo.org/x/drivers v0.28.0
 )
 
 require (
