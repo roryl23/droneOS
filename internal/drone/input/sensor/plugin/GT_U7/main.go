@@ -1,12 +1,14 @@
 package GT_U7
 
 import (
+	"context"
 	"droneOS/internal/config"
 	"droneOS/internal/drone/input/sensor"
 	"time"
 )
 
 func Main(
+	ctx context.Context,
 	s *config.Device,
 	eventCh *chan sensor.Event,
 ) {

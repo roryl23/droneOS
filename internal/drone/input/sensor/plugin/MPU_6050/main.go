@@ -1,15 +1,18 @@
 package MPU_6050
 
 import (
+	"context"
 	"droneOS/internal/config"
 	"droneOS/internal/drone/input/sensor"
+	"time"
+
 	"github.com/rs/zerolog/log"
 	"gobot.io/x/gobot/drivers/i2c"
 	"gobot.io/x/gobot/platforms/raspi"
-	"time"
 )
 
 func Main(
+	ctx context.Context,
 	s *config.Device,
 	eventCh *chan sensor.Event,
 ) {

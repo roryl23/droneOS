@@ -2,10 +2,10 @@ package protocol
 
 import (
 	"bytes"
+	"context"
 	"droneOS/internal/config"
 	"droneOS/internal/utils"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -30,7 +30,7 @@ func CheckWiFi(s *config.Config, c http.Client) (bool, error) {
 	}
 	msgBytes, err := json.Marshal(msg)
 	if err != nil {
-		return false, errors.New(fmt.Sprintf("error encoding JSON: %s", err))
+		return false, fmt.Errorf("error encoding JSON: %s", err)
 	}
 
 	resp, err := c.Post(
@@ -39,24 +39,24 @@ func CheckWiFi(s *config.Config, c http.Client) (bool, error) {
 		bytes.NewBuffer(msgBytes),
 	)
 	if err != nil {
-		return false, errors.New(fmt.Sprintf("error sending request: %s", err))
+		return false, fmt.Errorf("error sending request: %s", err)
 	}
 	defer resp.Body.Close()
 
 	data := make([]byte, 1024)
 	n, err := resp.Body.Read(data)
 	if err != nil && err != io.EOF {
-		return false, errors.New(fmt.Sprintf("error reading request: %s", err))
+		return false, fmt.Errorf("error reading request: %s", err)
 	} else {
 		if n > 0 {
 			data = data[:n]
 			var response Message
 			err = json.Unmarshal(data, &response)
 			if err != nil {
-				return false, errors.New(fmt.Sprintf("error decoding JSON: %s", err))
+				return false, fmt.Errorf("error decoding JSON: %s", err)
 			}
 			if response.Data != "pong" {
-				return false, errors.New(fmt.Sprintf("invalid response: %s", response.Data))
+				return false, fmt.Errorf("invalid response: %s", response.Data)
 			} else {
 				return true, nil
 			}
@@ -71,7 +71,7 @@ var FuncMap = map[string]interface{}{
 }
 
 // TCPHandler handles TCP connections and messages
-func TCPHandler(conn net.Conn) {
+func TCPHandler(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 
 	var msg Message
@@ -84,7 +84,7 @@ func TCPHandler(conn net.Conn) {
 	}
 	log.Debug().Interface("msg", msg)
 
-	output, err := utils.CallFunctionByName(FuncMap, msg.Cmd, nil)
+	output, err := utils.CallFunctionByName(ctx, FuncMap, msg.Cmd, nil)
 	if err != nil {
 		log.Error().Err(err).
 			Msg("error executing command")

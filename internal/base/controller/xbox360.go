@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"context"
+
 	"github.com/rs/zerolog/log"
 	"gobot.io/x/gobot"
 	"gobot.io/x/gobot/platforms/joystick"
@@ -10,7 +12,7 @@ const (
 	JoystickName = "xbox360"
 )
 
-func Xbox360Interface(cCh *chan Event[any]) {
+func Xbox360Interface(ctx context.Context, cCh *chan Event[any]) {
 	joystickAdaptor := joystick.NewAdaptor()
 	err := joystickAdaptor.Connect()
 	if err != nil {
@@ -19,7 +21,8 @@ func Xbox360Interface(cCh *chan Event[any]) {
 	defer func(joystickAdaptor *joystick.Adaptor) {
 		err := joystickAdaptor.Finalize()
 		if err != nil {
-			log.Fatal().Err(err).Msg("failed to finalize joystick adaptor")
+			log.Fatal().Err(err).
+				Msg("failed to finalize joystick adaptor")
 		}
 	}(joystickAdaptor)
 	j := joystick.NewDriver(joystickAdaptor, JoystickName)
@@ -92,14 +95,13 @@ func Xbox360Interface(cCh *chan Event[any]) {
 		[]gobot.Device{j},
 		inputHandler,
 	)
-	defer func(robot *gobot.Robot) {
-		err := robot.Stop()
-		if err != nil {
-			log.Fatal().Err(err).Msg("failed to stop robot")
-		}
-	}(robot)
-	err = robot.Start()
-	if err != nil {
+
+	if err := robot.Start(false); err != nil {
 		log.Fatal().Err(err).Msg("failed to start robot")
+		return
 	}
+	defer robot.Stop()
+
+	// block until context canceled
+	<-ctx.Done()
 }

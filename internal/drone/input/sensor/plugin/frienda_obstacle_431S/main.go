@@ -1,12 +1,14 @@
 package frienda_obstacle_431S
 
 import (
+	"context"
 	"droneOS/internal/config"
 	"droneOS/internal/drone/input/sensor"
 	"time"
 )
 
 func Main(
+	ctx context.Context,
 	s *config.Device,
 	eCh *[]chan sensor.Event,
 ) {

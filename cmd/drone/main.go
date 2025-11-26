@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"droneOS/internal/config"
 	"droneOS/internal/drone/control"
 	"droneOS/internal/drone/input/sensor"
@@ -9,8 +10,10 @@ import (
 	"droneOS/internal/utils"
 	"flag"
 	"math"
+	"os/signal"
 	"runtime"
 	"runtime/debug"
+	"syscall"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -28,6 +31,13 @@ func main() {
 	settings := config.GetConfig(*configFile)
 	log.Info().Interface("settings", settings)
 
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,  // ctrl+C
+		syscall.SIGTERM, // docker stop, systemd
+	)
+	defer stop() // restores default signal behavior
+
 	chips := gpio.Init()
 	log.Info().Interface("chips", chips)
 
@@ -44,6 +54,7 @@ func main() {
 	for index, device := range settings.Drone.Sensors {
 		go func() {
 			_, err := utils.CallFunctionByName(
+				ctx,
 				SensorFuncMap,
 				device.Name,
 				&settings.Drone.Sensors[index],
@@ -62,6 +73,7 @@ func main() {
 	for index, name := range settings.Drone.ControlAlgorithmPriority {
 		go func() {
 			_, err := utils.CallFunctionByName(
+				ctx,
 				ControlFuncMap,
 				name,
 				&settings,
@@ -86,6 +98,7 @@ func main() {
 			if device.Name == task.Name {
 				go func() {
 					_, err := utils.CallFunctionByName(
+						ctx,
 						OutputFuncMap,
 						device.Name,
 						&settings,

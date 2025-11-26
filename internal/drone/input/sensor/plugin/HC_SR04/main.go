@@ -1,13 +1,16 @@
 package HC_SR04
 
 import (
+	"context"
 	"droneOS/internal/config"
 	"droneOS/internal/drone/input/sensor"
-	"github.com/rs/zerolog/log"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 func Main(
+	ctx context.Context,
 	s *config.Device,
 	eventCh *chan sensor.Event,
 ) {

@@ -1,16 +1,19 @@
 package obstacle_avoidance
 
 import (
+	"context"
 	"droneOS/internal/config"
 	"droneOS/internal/drone/control"
 	"droneOS/internal/drone/input/sensor"
 	"droneOS/internal/drone/output"
-	"github.com/rs/zerolog/log"
 	"math/rand"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 func Main(
+	ctx context.Context,
 	s *config.Config,
 	priority int,
 	priorityMutex *control.PriorityMutex,

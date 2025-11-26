@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"droneOS/internal/base/controller"
 	"droneOS/internal/config"
 	"droneOS/internal/protocol"
@@ -8,6 +9,8 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"os/signal"
+	"syscall"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -25,10 +28,18 @@ func main() {
 	settings := config.GetConfig(*configFile)
 	log.Info().Interface("settings", settings)
 
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,  // ctrl+C
+		syscall.SIGTERM, // docker stop, systemd
+	)
+	defer stop() // restores default signal behavior
+
 	// initialize the configured controller interface and handler
 	controllerChannel := make(chan controller.Event[any])
 	go func() {
 		output, err := utils.CallFunctionByName(
+			ctx,
 			controller.FuncMap,
 			settings.Base.Controller,
 			&controllerChannel,
@@ -40,7 +51,7 @@ func main() {
 			return
 		}
 	}()
-	go controller.EventHandler(controllerChannel)
+	go controller.EventHandler(ctx, controllerChannel)
 
 	// Start TCP server
 	addr := fmt.Sprintf("%s:%d", settings.Base.Host, settings.Base.Port)
@@ -60,6 +71,6 @@ func main() {
 			log.Error().Err(err).
 				Msg("error accepting connection")
 		}
-		protocol.TCPHandler(conn)
+		protocol.TCPHandler(ctx, conn)
 	}
 }

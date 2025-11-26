@@ -1,6 +1,10 @@
 package controller
 
-import "github.com/rs/zerolog/log"
+import (
+	"context"
+
+	"github.com/rs/zerolog/log"
+)
 
 // these constants are used to identify the actions
 // that can be performed by the controller,
@@ -23,7 +27,7 @@ type Event[T any] struct {
 	Payload T
 }
 
-func EventHandler(eCh chan Event[any]) {
+func EventHandler(ctx context.Context, eCh chan Event[any]) {
 	for {
 		e := <-eCh
 		switch v := e.Payload.(type) {

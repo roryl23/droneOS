@@ -1,13 +1,16 @@
 package hawks_work_ESC
 
 import (
+	"context"
 	"droneOS/internal/config"
 	"droneOS/internal/drone/output"
-	"github.com/rs/zerolog/log"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 func Main(
+	ctx context.Context,
 	s *config.Device,
 	taskQueue *chan output.Task,
 ) error {
