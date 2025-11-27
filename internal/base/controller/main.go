@@ -54,6 +54,8 @@ func EventHandler(ctx context.Context, eCh <-chan Event[any]) {
 					Msg("unknown payload type")
 				continue
 			}
+
+			ev.Msg("")
 		}
 	}
 }
