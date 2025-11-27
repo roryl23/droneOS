@@ -21,6 +21,7 @@ func Xbox360Interface(
 	for {
 		adaptor := joystick.NewAdaptor()
 		if err := adaptor.Connect(); err != nil {
+			log.Debug().Msg("no joystick found, waiting...")
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
