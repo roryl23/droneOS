@@ -5,13 +5,13 @@ import (
 	"droneOS/internal/base/controller"
 	"droneOS/internal/config"
 	"droneOS/internal/protocol"
-	"droneOS/internal/utils"
 	"flag"
 	"fmt"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -40,17 +40,21 @@ func main() {
 	// initialize the configured controller interface and handler
 	controllerChannel := make(chan controller.Event[any])
 	go func() {
-		output, err := utils.CallFunctionByName(
-			ctx,
-			controller.FuncMap,
-			settings.Base.Controller,
-			&controllerChannel,
-		)
-		if err != nil {
-			log.Error().Err(err).
-				Interface("output", output).
-				Msg("error initializing controller")
-			return
+		for {
+			err := controller.Xbox360Interface(ctx, &controllerChannel)
+			if err == nil {
+				return
+			}
+
+			log.Warn().Err(err).
+				Msg("controller failed, retrying in 5 seconds...")
+
+			select {
+			case <-ctx.Done():
+				return // shutdown requested
+			case <-time.After(5 * time.Second):
+				// retry
+			}
 		}
 	}()
 	go controller.EventHandler(ctx, controllerChannel)

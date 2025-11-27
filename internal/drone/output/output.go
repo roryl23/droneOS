@@ -2,10 +2,10 @@ package output
 
 type Task struct {
 	Name string // package
-	Data interface{}
+	Data any
 }
 
 type Output struct {
 	Name string
-	Main func(i interface{}) error
+	Main func(i any) error
 }

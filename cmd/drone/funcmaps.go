@@ -11,19 +11,19 @@ import (
 	"droneOS/internal/drone/output/plugin/hawks_work_ESC"
 )
 
-var SensorFuncMap = map[string]interface{}{
+var SensorFuncMap = map[string]any{
 	"frienda_obstacle_431S": frienda_obstacle_431S.Main,
 	"GT_U7":                 GT_U7.Main,
 	"HC_SR04":               HC_SR04.Main,
 	"MPU_6050":              MPU_6050.Main,
 }
 
-var ControlFuncMap = map[string]interface{}{
+var ControlFuncMap = map[string]any{
 	"obstacle_avoidance": obstacle_avoidance.Main,
 	"pilot":              pilot.Main,
 }
 
-var OutputFuncMap = map[string]interface{}{
+var OutputFuncMap = map[string]any{
 	"hawks_work_ESC": hawks_work_ESC.Main,
 	"MG90S":          MG90S.Main,
 }

@@ -9,9 +9,9 @@ import (
 // CallFunctionByName Helper function to call a function by name from the map
 func CallFunctionByName(
 	ctx context.Context,
-	funcMap map[string]interface{},
+	funcMap map[string]any,
 	name string,
-	inputs ...interface{},
+	inputs ...any,
 ) ([]reflect.Value, error) {
 	fn, ok := funcMap[name]
 	if !ok {

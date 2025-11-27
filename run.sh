@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-./build/droneOS/base --mode base --config-file ./configs/config.yaml &
+./build/droneOS/base.bin --config-file ./configs/config.yaml &
 basePid=$!
-./build/droneOS/drone --mode drone --config-file ./configs/config.yaml &
+./build/droneOS/drone.bin --config-file ./configs/config.yaml &
 dronePid=$!
 
 # define cleanup function

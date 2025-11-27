@@ -23,7 +23,11 @@ func ping(m Message) Message {
 }
 
 // CheckWiFi Request base to determine whether the WiFi connection is operational
-func CheckWiFi(s *config.Config, c http.Client) (bool, error) {
+func CheckWiFi(
+	ctx context.Context,
+	s *config.Config,
+	c http.Client,
+) (bool, error) {
 	msg := Message{
 		ID:  s.Drone.ID,
 		Cmd: "ping",
@@ -66,7 +70,7 @@ func CheckWiFi(s *config.Config, c http.Client) (bool, error) {
 }
 
 // FuncMap Map of function names to functions
-var FuncMap = map[string]interface{}{
+var FuncMap = map[string]any{
 	"ping": ping,
 }
 
