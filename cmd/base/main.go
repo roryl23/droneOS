@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"os"
 	"os/signal"
 	"syscall"
 
@@ -18,6 +19,14 @@ import (
 
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	logger := zerolog.New(os.Stdout)
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,  // ctrl+C
+		syscall.SIGTERM, // docker stop, systemd
+	)
+	defer stop() // restores default signal behavior
+	ctx = logger.WithContext(ctx)
 
 	configFile := flag.String(
 		"config-file",
@@ -27,13 +36,6 @@ func main() {
 	flag.Parse()
 	settings := config.GetConfig(*configFile)
 	log.Info().Interface("settings", settings)
-
-	ctx, stop := signal.NotifyContext(
-		context.Background(),
-		syscall.SIGINT,  // ctrl+C
-		syscall.SIGTERM, // docker stop, systemd
-	)
-	defer stop() // restores default signal behavior
 
 	// initialize the configured controller interface and handler
 	controllerChannel := make(chan controller.Event[any])

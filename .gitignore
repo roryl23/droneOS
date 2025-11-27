@@ -1,6 +1,8 @@
 .idea/workspace.xml
 # .vscode/
 
+__debug_*
+
 *.img*
 
 build/

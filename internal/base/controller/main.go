@@ -3,7 +3,7 @@ package controller
 import (
 	"context"
 
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 // these constants are used to identify the actions
@@ -27,25 +27,33 @@ type Event[T any] struct {
 	Payload T
 }
 
-func EventHandler(ctx context.Context, eCh chan Event[any]) {
+func EventHandler(ctx context.Context, eCh <-chan Event[any]) {
+	logger := zerolog.Ctx(ctx)
+
 	for {
-		e := <-eCh
-		switch v := e.Payload.(type) {
-		// buttons
-		case bool:
-			log.Info().
-				Str("action", e.Action).
-				Interface("payload", v)
-		// axes movement
-		case int16:
-			log.Info().
-				Str("action", e.Action).
-				Interface("payload", v)
-		default:
-			log.Warn().
-				Str("action", e.Action).
-				Interface("payload", v).
-				Msg("unknown payload type")
+		select {
+		case <-ctx.Done():
+			return
+		case e, ok := <-eCh:
+			if !ok {
+				return // channel closed
+			}
+
+			ev := logger.Info().
+				Str("action", e.Action)
+
+			switch payload := e.Payload.(type) {
+			case bool:
+				ev.Bool("payload", payload)
+			case int16:
+				ev.Int16("payload", payload)
+			default:
+				logger.Warn().
+					Str("action", e.Action).
+					Interface("payload", payload).
+					Msg("unknown payload type")
+				continue
+			}
 		}
 	}
 }
