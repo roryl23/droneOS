@@ -42,17 +42,12 @@ func main() {
 	go func() {
 		for {
 			err := controller.Xbox360Interface(ctx, &controllerChannel)
-			if err == nil {
-				return
-			}
-
 			log.Warn().Err(err).
-				Msg("controller failed, retrying in 5 seconds...")
-
+				Msg("controller.Xbox360Interface failed, retrying in 1 second...")
 			select {
 			case <-ctx.Done():
 				return // shutdown requested
-			case <-time.After(5 * time.Second):
+			case <-time.After(1 * time.Second):
 				// retry
 			}
 		}
