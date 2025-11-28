@@ -1,12 +1,10 @@
-package HC_SR04
+package GT_U7
 
 import (
 	"context"
 	"droneOS/internal/config"
-	"droneOS/internal/drone/input/sensor"
+	"droneOS/internal/drivers/sensor"
 	"time"
-
-	"github.com/rs/zerolog/log"
 )
 
 func Main(
@@ -15,7 +13,7 @@ func Main(
 	eventCh *chan sensor.Event,
 ) {
 	for {
-		log.Info().Msg("sensor plugin HC_SR04 is running")
+		//log.Info("sensor plugin GT_U7 is running")
 		time.Sleep(500 * time.Millisecond)
 	}
 }

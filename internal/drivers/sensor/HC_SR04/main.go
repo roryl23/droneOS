@@ -1,9 +1,9 @@
-package hawks_work_ESC
+package HC_SR04
 
 import (
 	"context"
 	"droneOS/internal/config"
-	"droneOS/internal/drone/output"
+	"droneOS/internal/drivers/sensor"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -12,12 +12,10 @@ import (
 func Main(
 	ctx context.Context,
 	s *config.Device,
-	taskQueue *chan output.Task,
-) error {
+	eventCh *chan sensor.Event,
+) {
 	for {
-		task := <-*taskQueue
-		log.Info().Interface("task", task)
-
+		log.Info().Msg("sensor plugin HC_SR04 is running")
 		time.Sleep(500 * time.Millisecond)
 	}
 }

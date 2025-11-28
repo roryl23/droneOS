@@ -3,7 +3,7 @@ package MPU_6050
 import (
 	"context"
 	"droneOS/internal/config"
-	"droneOS/internal/drone/input/sensor"
+	"droneOS/internal/drivers/sensor"
 	"time"
 
 	"github.com/rs/zerolog/log"

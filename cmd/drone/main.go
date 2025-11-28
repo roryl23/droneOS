@@ -3,10 +3,18 @@ package main
 import (
 	"context"
 	"droneOS/internal/config"
+	"droneOS/internal/drivers/gpio"
+	"droneOS/internal/drivers/motor/MG90S"
+	"droneOS/internal/drivers/motor/hawks_work_ESC"
+	"droneOS/internal/drivers/sensor"
+	"droneOS/internal/drivers/sensor/GT_U7"
+	"droneOS/internal/drivers/sensor/HC_SR04"
+	"droneOS/internal/drivers/sensor/MPU_6050"
+	"droneOS/internal/drivers/sensor/frienda_obstacle_431S"
+	"droneOS/internal/drone"
 	"droneOS/internal/drone/control"
-	"droneOS/internal/drone/input/sensor"
-	"droneOS/internal/drone/output"
-	"droneOS/internal/gpio"
+	"droneOS/internal/drone/control/obstacle_avoidance"
+	"droneOS/internal/drone/control/pilot"
 	"droneOS/internal/utils"
 	"flag"
 	"math"
@@ -18,6 +26,23 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
+
+var SensorFuncMap = map[string]any{
+	"frienda_obstacle_431S": frienda_obstacle_431S.Main,
+	"GT_U7":                 GT_U7.Main,
+	"HC_SR04":               HC_SR04.Main,
+	"MPU_6050":              MPU_6050.Main,
+}
+
+var ControlFuncMap = map[string]any{
+	"obstacle_avoidance": obstacle_avoidance.Main,
+	"pilot":              pilot.Main,
+}
+
+var OutputFuncMap = map[string]any{
+	"hawks_work_ESC": hawks_work_ESC.Main,
+	"MG90S":          MG90S.Main,
+}
 
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
@@ -68,7 +93,7 @@ func main() {
 	}
 
 	// initialize and run control algorithms
-	taskQueue := make(chan output.Task)
+	taskQueue := make(chan drone.Task)
 	priorityMutex := control.NewPriorityMutex()
 	for index, name := range settings.Drone.ControlAlgorithmPriority {
 		go func() {

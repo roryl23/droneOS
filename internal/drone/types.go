@@ -1,4 +1,4 @@
-package output
+package drone
 
 type Task struct {
 	Name string // package

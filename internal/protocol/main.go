@@ -26,7 +26,7 @@ func ping(m Message) Message {
 func CheckWiFi(
 	ctx context.Context,
 	s *config.Config,
-	c http.Client,
+	c *http.Client,
 ) (bool, error) {
 	msg := Message{
 		ID:  s.Drone.ID,
