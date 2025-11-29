@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 	"github.com/veandco/go-sdl2/sdl"
 	"gobot.io/x/gobot"
 	"gobot.io/x/gobot/platforms/joystick"
@@ -18,10 +18,11 @@ func Xbox360Interface(
 	ctx context.Context,
 	cCh *chan Event[any],
 ) error {
+	logger := zerolog.Ctx(ctx)
 	for {
 		adaptor := joystick.NewAdaptor()
 		if err := adaptor.Connect(); err != nil {
-			log.Debug().Msg("no joystick found, waiting...")
+			logger.Debug().Msg("no joystick found, waiting...")
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -30,7 +31,7 @@ func Xbox360Interface(
 			}
 		}
 
-		log.Info().Msg("Xbox 360 connected")
+		logger.Info().Msg("Xbox 360 connected")
 
 		// device appeared — try to use it
 		driver := joystick.NewDriver(adaptor, JoystickName)
@@ -54,7 +55,7 @@ func Xbox360Interface(
 					Payload: v,
 				}
 			} else {
-				log.Warn().
+				logger.Warn().
 					Interface("payload", data).
 					Msg("unexpected data type for LeftX")
 			}
@@ -66,7 +67,7 @@ func Xbox360Interface(
 					Payload: v,
 				}
 			} else {
-				log.Warn().
+				logger.Warn().
 					Interface("payload", data).
 					Msg("unexpected data type for LeftY")
 			}
@@ -78,7 +79,7 @@ func Xbox360Interface(
 					Payload: v,
 				}
 			} else {
-				log.Warn().
+				logger.Warn().
 					Interface("payload", data).
 					Msg("unexpected data type for RightX")
 			}
@@ -90,7 +91,7 @@ func Xbox360Interface(
 					Payload: v,
 				}
 			} else {
-				log.Warn().
+				logger.Warn().
 					Interface("payload", data).
 					Msg("unexpected data type for RightY")
 			}

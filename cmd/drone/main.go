@@ -6,6 +6,8 @@ import (
 	"droneOS/internal/drivers/gpio"
 	"droneOS/internal/drivers/motor/MG90S"
 	"droneOS/internal/drivers/motor/hawks_work_ESC"
+	"droneOS/internal/drivers/radio"
+	"droneOS/internal/drivers/radio/SX1262"
 	"droneOS/internal/drivers/sensor"
 	"droneOS/internal/drivers/sensor/GT_U7"
 	"droneOS/internal/drivers/sensor/HC_SR04"
@@ -27,6 +29,10 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+var RadioFuncMap = map[string]any{
+	"SX1262": SX1262.Main,
+}
+
 var SensorFuncMap = map[string]any{
 	"frienda_obstacle_431S": frienda_obstacle_431S.Main,
 	"GT_U7":                 GT_U7.Main,
@@ -39,7 +45,7 @@ var ControlFuncMap = map[string]any{
 	"pilot":              pilot.Main,
 }
 
-var OutputFuncMap = map[string]any{
+var MotorFuncMap = map[string]any{
 	"hawks_work_ESC": hawks_work_ESC.Main,
 	"MG90S":          MG90S.Main,
 }
@@ -71,8 +77,27 @@ func main() {
 	debug.SetGCPercent(-1)
 	debug.SetMemoryLimit(math.MaxInt64)
 
+	// initialize and run radio
+	radioEventChannel := make(chan radio.Event)
+	go func() {
+		_, err := utils.CallFunctionByName(
+			ctx,
+			RadioFuncMap,
+			settings.Drone.Radio.Name,
+			&settings.Drone.Radio,
+			&radioEventChannel,
+		)
+		if err != nil {
+			log.Error().Err(err).
+				Msg("error initializing radio")
+		}
+	}()
+
 	// initialize and run sensors
-	sensorEventChannels := make([]chan sensor.Event, len(settings.Drone.Sensors))
+	sensorEventChannels := make(
+		[]chan sensor.Event,
+		len(settings.Drone.Sensors),
+	)
 	for i := range sensorEventChannels {
 		sensorEventChannels[i] = make(chan sensor.Event)
 	}
@@ -86,8 +111,8 @@ func main() {
 				&sensorEventChannels,
 			)
 			if err != nil {
-				log.Error().Err(err).
-					Msg("error calling sensor")
+				log.Fatal().Err(err).
+					Msg("error initializing sensors")
 			}
 		}()
 	}
@@ -108,8 +133,8 @@ func main() {
 				&taskQueue,
 			)
 			if err != nil {
-				log.Error().Err(err).
-					Msg("error calling control algorithm")
+				log.Fatal().Err(err).
+					Msg("error initializing control algorithms")
 			}
 		}()
 	}
@@ -119,22 +144,19 @@ func main() {
 	for {
 		// handle output according to current task queue
 		task := <-taskQueue
-		for _, device := range settings.Drone.Outputs {
-			if device.Name == task.Name {
-				go func() {
-					_, err := utils.CallFunctionByName(
-						ctx,
-						OutputFuncMap,
-						device.Name,
-						&settings,
-						&taskQueue,
-					)
-					if err != nil {
-						log.Error().Err(err).Msg("error calling output")
-					}
-				}()
+		go func() {
+			_, err := utils.CallFunctionByName(
+				ctx,
+				MotorFuncMap,
+				task.Name,
+				&settings,
+				&taskQueue,
+			)
+			if err != nil {
+				log.Fatal().Err(err).Str("task", task.Name).
+					Msg("error calling task")
 			}
-		}
+		}()
 		runtime.GC()
 	}
 }

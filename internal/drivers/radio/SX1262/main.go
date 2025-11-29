@@ -1,15 +1,16 @@
 //go:build linux
 // +build linux
 
-package radio
+package SX1262
 
 import (
+	"context"
+	"droneOS/internal/config"
+	"droneOS/internal/drivers/radio"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"github.com/stianeikeland/go-rpio/v4"
 	"github.com/tarm/serial"
 )
@@ -31,21 +32,14 @@ type LoRaHAT struct {
 	mode   string // "config", "tx", "rx"
 }
 
-func NewLoRaHAT() (*LoRaHAT, error) {
-	// Initialize logging
-	zerolog.TimeFieldFormat = "2006-01-02 15:04:05"
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+func NewLoRaHAT(ctx context.Context) (*LoRaHAT, error) {
+	logger := zerolog.Ctx(ctx)
 
-	hatLog := log.Logger.With().
-		Str("component", "lora_hat").
-		Str("platform", "raspberry_pi_linux").
-		Logger()
-
-	hatLog.Info().Msg("Initializing LoRa HAT on Raspberry Pi")
+	logger.Info().Msg("Initializing LoRa HAT on Raspberry Pi")
 
 	// Initialize GPIO
 	if err := rpio.Open(); err != nil {
-		hatLog.Error().Err(err).Msg("Failed to open GPIO")
+		logger.Error().Err(err).Msg("Failed to open GPIO")
 		return nil, err
 	}
 
@@ -63,7 +57,7 @@ func NewLoRaHAT() (*LoRaHAT, error) {
 	ser, err := serial.OpenPort(cfg)
 	if err != nil {
 		rpio.Close()
-		hatLog.Error().Err(err).Str("device", SERIAL_DEVICE).Msg("Failed to open serial port")
+		logger.Error().Err(err).Str("device", SERIAL_DEVICE).Msg("Failed to open serial port")
 		return nil, err
 	}
 
@@ -71,7 +65,7 @@ func NewLoRaHAT() (*LoRaHAT, error) {
 		serial: ser,
 		m0:     m0,
 		m1:     m1,
-		log:    hatLog,
+		log:    *logger,
 	}
 
 	// Set to configuration mode (M0=0, M1=1)
@@ -86,7 +80,7 @@ func NewLoRaHAT() (*LoRaHAT, error) {
 	// Set to normal mode (M0=0, M1=0)
 	hat.setMode("tx")
 
-	hatLog.Info().Msg("LoRa HAT initialized successfully")
+	logger.Info().Msg("LoRa HAT initialized successfully")
 	return hat, nil
 }
 
@@ -126,12 +120,14 @@ func (h *LoRaHAT) configureLoRa() error {
 
 	_, err := h.serial.Write(configCmd)
 	if err != nil {
-		h.log.Error().Err(err).Msg("Failed to send configuration command")
+		h.log.Error().Err(err).
+			Msg("Failed to send configuration command")
 		return err
 	}
 
 	time.Sleep(100 * time.Millisecond)
-	h.log.Info().Msg("LoRa configuration sent")
+	h.log.Info().
+		Msg("LoRa configuration sent")
 	return nil
 }
 
@@ -147,7 +143,8 @@ func (h *LoRaHAT) Send(data []byte) error {
 		return err
 	}
 
-	h.log.Info().Str("payload", string(data)).Msg("LoRa packet sent")
+	h.log.Info().Str("payload", string(data)).
+		Msg("LoRa packet sent")
 	return nil
 }
 
@@ -177,29 +174,39 @@ func (h *LoRaHAT) Close() {
 	h.log.Info().Msg("LoRa HAT resources cleaned up")
 }
 
-func main() {
-	hat, err := NewLoRaHAT()
+func Main(
+	ctx context.Context,
+	s *config.Radio,
+	rCh *chan radio.Event,
+) {
+	logger := zerolog.Ctx(ctx)
+
+	hat, err := NewLoRaHAT(ctx)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to initialize LoRa HAT")
+		logger.Fatal().Err(err).Msg("Failed to initialize LoRa HAT")
 	}
 	defer hat.Close()
 
-	log.Info().Msg("=== Raspberry Pi LoRa HAT Application ===")
+	logger.Info().Msg("=== Raspberry Pi LoRa HAT Application ===")
 
 	counter := 0
 	for {
 		counter++
-		payload := fmt.Sprintf("Pi-LoRa #%03d @ %s", counter, time.Now().Format("15:04:05"))
+		payload := fmt.Sprintf(
+			"Pi-LoRa #%03d @ %s",
+			counter,
+			time.Now().Format("15:04:05"),
+		)
 
 		if err := hat.Send([]byte(payload)); err != nil {
-			log.Warn().Err(err).Msg("Send failed")
+			logger.Warn().Err(err).Msg("Send failed")
 		}
 
 		// Check for received data
 		if data, err := hat.Receive(); err == nil && len(data) > 0 {
-			log.Info().Str("received", string(data)).Msg("Incoming packet")
+			logger.Info().Str("received", string(data)).Msg("Incoming packet")
 		}
 
-		time.Sleep(10 * time.Second)
+		time.Sleep(1 * time.Second)
 	}
 }
