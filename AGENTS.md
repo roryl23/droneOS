@@ -15,6 +15,7 @@ This repository contains Go code for a base station and drone runtime with plugg
 ## How to run (local dev)
 - Base: `go run cmd/base/main.go -config-file configs/config.yaml`
 - Drone: `go run cmd/drone/main.go -config-file configs/config.yaml`
+- Both the base and drone need to be run in order to validate integration tests.
 
 ## Protocol expectations
 - Messages are JSON payloads framed with a 4-byte big-endian length prefix.

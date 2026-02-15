@@ -1,0 +1,13 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="go test droneOS" type="GoTestRunConfiguration" factoryName="Go Test">
+    <module name="droneOS" />
+    <working_directory value="$PROJECT_DIR$" />
+    <go_parameters value="-tags=integration" />
+    <kind value="DIRECTORY" />
+    <package value="droneOS/internal/protocol" />
+    <directory value="$PROJECT_DIR$/internal/protocol" />
+    <filePath value="$PROJECT_DIR$/internal/protocol" />
+    <framework value="gotest" />
+    <method v="2" />
+  </configuration>
+</component>

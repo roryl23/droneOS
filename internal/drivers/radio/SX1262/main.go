@@ -6,8 +6,7 @@ package SX1262
 import (
 	"context"
 	"droneOS/internal/config"
-	"droneOS/internal/drivers/radio"
-	"fmt"
+	"droneOS/internal/protocol"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -177,36 +176,16 @@ func (h *LoRaHAT) Close() {
 func Main(
 	ctx context.Context,
 	s *config.Radio,
-	rCh *chan radio.Event,
-) {
+) (protocol.RadioLink, error) {
 	logger := zerolog.Ctx(ctx)
 
 	hat, err := NewLoRaHAT(ctx)
 	if err != nil {
-		logger.Fatal().Err(err).Msg("Failed to initialize LoRa HAT")
+		logger.Error().Err(err).Msg("Failed to initialize LoRa HAT")
+		return nil, err
 	}
-	defer hat.Close()
 
-	logger.Info().Msg("=== Raspberry Pi LoRa HAT Application ===")
-
-	counter := 0
-	for {
-		counter++
-		payload := fmt.Sprintf(
-			"Pi-LoRa #%03d @ %s",
-			counter,
-			time.Now().Format("15:04:05"),
-		)
-
-		if err := hat.Send([]byte(payload)); err != nil {
-			logger.Warn().Err(err).Msg("Send failed")
-		}
-
-		// Check for received data
-		if data, err := hat.Receive(); err == nil && len(data) > 0 {
-			logger.Info().Str("received", string(data)).Msg("Incoming packet")
-		}
-
-		time.Sleep(1 * time.Second)
-	}
+	logger.Info().Msg("LoRa HAT ready")
+	_ = s
+	return hat, nil
 }
