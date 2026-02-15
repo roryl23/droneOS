@@ -5,12 +5,14 @@ import (
 	"droneOS/internal/config"
 	"droneOS/internal/controller"
 	"droneOS/internal/protocol"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -77,20 +79,37 @@ func main() {
 
 	// initialize the configured controller interface and handler
 	controllerChannel := make(chan controller.Event[any])
-	go func() {
-		for {
-			err := controller.Xbox360Interface(ctx, &controllerChannel)
-			log.Warn().Err(err).
-				Msg("controller.Xbox360Interface failed, retrying in 1 second...")
-			select {
-			case <-ctx.Done():
-				return // shutdown requested
-			case <-time.After(1 * time.Second):
-				// retry
-			}
+	controllerName := strings.TrimSpace(settings.Base.Controller)
+	if controllerName == "" || strings.EqualFold(controllerName, "none") {
+		log.Info().Msg("controller disabled")
+	} else {
+		ctrlFnAny, ok := controller.FuncMap[controllerName]
+		if !ok {
+			log.Error().Str("controller", controllerName).
+				Msg("unknown controller")
+		} else if ctrlFn, ok := ctrlFnAny.(func(context.Context, *chan controller.Event[any]) error); !ok {
+			log.Error().Str("controller", controllerName).
+				Msg("controller has unexpected signature")
+		} else {
+			go func() {
+				for {
+					err := ctrlFn(ctx, &controllerChannel)
+					if err == nil || errors.Is(err, context.Canceled) {
+						return // normal shutdown
+					}
+					log.Warn().Err(err).
+						Msg("controller interface failed, retrying in 1 second...")
+					select {
+					case <-ctx.Done():
+						return // shutdown requested
+					case <-time.After(1 * time.Second):
+						// retry
+					}
+				}
+			}()
+			go controller.EventHandler(ctx, controllerChannel)
 		}
-	}()
-	go controller.EventHandler(ctx, controllerChannel)
+	}
 
 	radio(ctx, &settings)
 }

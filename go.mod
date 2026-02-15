@@ -3,10 +3,10 @@ module droneOS
 go 1.23.0
 
 require (
+	github.com/roryl23/xpad-go v0.0.0-20260215173830-218c27de6a28
 	github.com/rs/zerolog v1.34.0
 	github.com/stianeikeland/go-rpio/v4 v4.6.0
 	github.com/tarm/serial v0.0.0-20180830185346-98f6abe2eb07
-	github.com/veandco/go-sdl2 v0.4.40
 	github.com/warthog618/go-gpiocdev v0.9.0
 	gobot.io/x/gobot v1.16.0
 	gopkg.in/yaml.v3 v3.0.1

@@ -2,16 +2,18 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"time"
 
+	"github.com/roryl23/xpad-go"
 	"github.com/rs/zerolog"
-	"github.com/veandco/go-sdl2/sdl"
-	"gobot.io/x/gobot"
-	"gobot.io/x/gobot/platforms/joystick"
 )
 
 const (
-	JoystickName = "xbox360"
+	xpadScanInterval  = 250 * time.Millisecond
+	xpadEventInterval = 250 * time.Millisecond
+	maxInt16          = int32(1<<15 - 1)
+	minInt16          = int32(-1 << 15)
 )
 
 func Xbox360Interface(
@@ -20,110 +22,121 @@ func Xbox360Interface(
 ) error {
 	logger := zerolog.Ctx(ctx)
 	for {
-		adaptor := joystick.NewAdaptor()
-		if err := adaptor.Connect(); err != nil {
-			logger.Debug().Msg("no joystick found, waiting...")
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(250 * time.Millisecond):
-				continue
-			}
+		info, err := waitForXpad(ctx, logger)
+		if err != nil {
+			return err
 		}
 
-		logger.Info().Msg("Xbox 360 connected")
-
-		// device appeared — try to use it
-		driver := joystick.NewDriver(adaptor, JoystickName)
-
-		driver.On(joystick.APress, func(data any) {
-			*cCh <- Event[any]{
-				Action:  TAKEOFF,
-				Payload: true,
+		dev, err := xpad.OpenDevice(info)
+		if err != nil {
+			logger.Warn().Err(err).
+				Msg("failed to open xpad device, retrying")
+			if !sleepOrDone(ctx, xpadScanInterval) {
+				return ctx.Err()
 			}
-		})
-		driver.On(joystick.BPress, func(data any) {
-			*cCh <- Event[any]{
-				Action:  LAND,
-				Payload: true,
-			}
-		})
-		driver.On(joystick.LeftX, func(data any) {
-			if v, ok := data.(int16); ok {
-				*cCh <- Event[any]{
-					Action:  MOVE_X,
-					Payload: v,
-				}
-			} else {
-				logger.Warn().
-					Interface("payload", data).
-					Msg("unexpected data type for LeftX")
-			}
-		})
-		driver.On(joystick.LeftY, func(data any) {
-			if v, ok := data.(int16); ok {
-				*cCh <- Event[any]{
-					Action:  MOVE_Y,
-					Payload: v,
-				}
-			} else {
-				logger.Warn().
-					Interface("payload", data).
-					Msg("unexpected data type for LeftY")
-			}
-		})
-		driver.On(joystick.RightX, func(data any) {
-			if v, ok := data.(int16); ok {
-				*cCh <- Event[any]{
-					Action:  ROTATE,
-					Payload: v,
-				}
-			} else {
-				logger.Warn().
-					Interface("payload", data).
-					Msg("unexpected data type for RightX")
-			}
-		})
-		driver.On(joystick.RightY, func(data any) {
-			if v, ok := data.(int16); ok {
-				*cCh <- Event[any]{
-					Action:  ADJUST_ALTITUDE,
-					Payload: v,
-				}
-			} else {
-				logger.Warn().
-					Interface("payload", data).
-					Msg("unexpected data type for RightY")
-			}
-		})
-
-		robot := gobot.NewRobot("joystick",
-			[]gobot.Connection{adaptor},
-			[]gobot.Device{driver},
-		)
-
-		if err := robot.Start(false); err != nil {
-			adaptor.Finalize()
 			continue
 		}
-		defer robot.Stop()
+		logger.Info().
+			Str("name", info.Name).
+			Str("path", info.Path).
+			Msg("Xbox 360 connected")
 
-		disconnect := make(chan struct{})
-		go func() {
-			for {
-				if sdl.NumJoysticks() < 1 {
-					close(disconnect)
-					return
-				}
-				time.Sleep(250 * time.Millisecond)
+		if err := readXpadEvents(ctx, dev, cCh); err != nil {
+			_ = dev.Close()
+			if errors.Is(err, context.Canceled) {
+				return err
 			}
-		}()
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-disconnect:
-			continue // retry on unplug
+			logger.Warn().Err(err).
+				Msg("xpad device disconnected, retrying")
+			continue
 		}
+		_ = dev.Close()
+	}
+}
+
+func waitForXpad(ctx context.Context, logger *zerolog.Logger) (xpad.DeviceInfo, error) {
+	for {
+		infos, err := xpad.FindXpadDevices()
+		if err != nil {
+			logger.Warn().Err(err).
+				Msg("failed to scan for xpad devices")
+		} else if len(infos) > 0 {
+			return infos[0], nil
+		} else {
+			logger.Debug().Msg("no xpad controller found, waiting...")
+		}
+
+		if !sleepOrDone(ctx, xpadScanInterval) {
+			return xpad.DeviceInfo{}, ctx.Err()
+		}
+	}
+}
+
+func readXpadEvents(ctx context.Context, dev *xpad.Device, cCh *chan Event[any]) error {
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		ev, err := dev.ReadEvent(xpadEventInterval)
+		if err != nil {
+			if errors.Is(err, xpad.ErrTimeout) {
+				continue
+			}
+			return err
+		}
+
+		switch ev.Kind {
+		case xpad.EVKey:
+			if ev.Value == 0 {
+				continue
+			}
+			switch ev.Code {
+			case xpad.BTNA:
+				sendEvent(cCh, TAKEOFF, true)
+			case xpad.BTNB:
+				sendEvent(cCh, LAND, true)
+			}
+		case xpad.EVAbs:
+			value := clampInt32ToInt16(ev.Value)
+			switch ev.Code {
+			case xpad.ABSX:
+				sendEvent(cCh, MOVE_X, value)
+			case xpad.ABSY:
+				sendEvent(cCh, MOVE_Y, value)
+			case xpad.ABSRX:
+				sendEvent(cCh, ROTATE, value)
+			case xpad.ABSRY:
+				sendEvent(cCh, ADJUST_ALTITUDE, value)
+			}
+		default:
+			// ignore other event types (EV_SYN, etc.)
+		}
+	}
+}
+
+func sendEvent(cCh *chan Event[any], action string, payload any) {
+	*cCh <- Event[any]{
+		Action:  action,
+		Payload: payload,
+	}
+}
+
+func clampInt32ToInt16(value int32) int16 {
+	if value > maxInt16 {
+		return int16(maxInt16)
+	}
+	if value < minInt16 {
+		return int16(minInt16)
+	}
+	return int16(value)
+}
+
+func sleepOrDone(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
 	}
 }
