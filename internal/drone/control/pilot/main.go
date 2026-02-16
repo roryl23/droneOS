@@ -1,21 +1,24 @@
 package pilot
 
 import (
+	"context"
 	"droneOS/internal/config"
+	"droneOS/internal/drivers/sensor"
+	"droneOS/internal/drone"
 	"droneOS/internal/drone/control"
-	"droneOS/internal/drone/input/sensor"
-	"droneOS/internal/drone/output"
-	"github.com/rs/zerolog/log"
 	"math/rand"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 func Main(
+	ctx context.Context,
 	s *config.Config,
 	priority int,
 	priorityMutex *control.PriorityMutex,
 	sensorEvents *chan sensor.Event,
-	taskQueue *chan output.Task,
+	taskQueue *chan drone.Task,
 ) {
 	for {
 		time.Sleep(time.Duration(rand.Intn(200-100+1)+100) * time.Millisecond)

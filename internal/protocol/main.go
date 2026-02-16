@@ -1,20 +1,18 @@
 package protocol
 
 import (
-	"bytes"
+	"context"
 	"droneOS/internal/config"
 	"droneOS/internal/utils"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
+	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
-func ping(m Message) Message {
+func ping(ctx context.Context, m Message) Message {
 	return Message{
 		ID:   m.ID,
 		Cmd:  m.Cmd,
@@ -22,61 +20,55 @@ func ping(m Message) Message {
 	}
 }
 
+func debugLog(ctx context.Context, m Message) Message {
+	logger := zerolog.Ctx(ctx)
+	if m.Data != "" {
+		logger.Debug().Str("remote", m.Data).Msg("drone debug")
+	}
+	return Message{
+		ID:   m.ID,
+		Cmd:  m.Cmd,
+		Data: "ok",
+	}
+}
+
 // CheckWiFi Request base to determine whether the WiFi connection is operational
-func CheckWiFi(s *config.Config, c http.Client) (bool, error) {
+func CheckWiFi(
+	ctx context.Context,
+	s *config.Config,
+) (bool, error) {
+	addr := fmt.Sprintf("%s:%d", s.Base.Host, s.Base.Port)
+	transport := &WiFiTransport{
+		Addr:    addr,
+		Timeout: 500 * time.Millisecond,
+	}
 	msg := Message{
 		ID:  s.Drone.ID,
 		Cmd: "ping",
 	}
-	msgBytes, err := json.Marshal(msg)
+	resp, err := transport.Send(ctx, msg)
 	if err != nil {
-		return false, errors.New(fmt.Sprintf("error encoding JSON: %s", err))
+		return false, fmt.Errorf("wifi ping failed: %w", err)
 	}
-
-	resp, err := c.Post(
-		fmt.Sprintf("http://%s:%d", s.Base.Host, s.Base.Port),
-		"application/json",
-		bytes.NewBuffer(msgBytes),
-	)
-	if err != nil {
-		return false, errors.New(fmt.Sprintf("error sending request: %s", err))
+	if resp.Data != "pong" {
+		return false, fmt.Errorf("invalid response: %s", resp.Data)
 	}
-	defer resp.Body.Close()
-
-	data := make([]byte, 1024)
-	n, err := resp.Body.Read(data)
-	if err != nil && err != io.EOF {
-		return false, errors.New(fmt.Sprintf("error reading request: %s", err))
-	} else {
-		if n > 0 {
-			data = data[:n]
-			var response Message
-			err = json.Unmarshal(data, &response)
-			if err != nil {
-				return false, errors.New(fmt.Sprintf("error decoding JSON: %s", err))
-			}
-			if response.Data != "pong" {
-				return false, errors.New(fmt.Sprintf("invalid response: %s", response.Data))
-			} else {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
+	return true, nil
 }
 
 // FuncMap Map of function names to functions
-var FuncMap = map[string]interface{}{
-	"ping": ping,
+var FuncMap = map[string]any{
+	"ping":           ping,
+	"debug_log":      debugLog,
+	"next_command":   nextControllerCommand,
+	"controller_ack": controllerAck,
 }
 
 // TCPHandler handles TCP connections and messages
-func TCPHandler(conn net.Conn) {
+func TCPHandler(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 
-	var msg Message
-	decoder := json.NewDecoder(conn)
-	err := decoder.Decode(&msg)
+	msg, err := DecodeMessage(conn)
 	if err != nil {
 		log.Error().Err(err).
 			Msg("error decoding message")
@@ -84,14 +76,20 @@ func TCPHandler(conn net.Conn) {
 	}
 	log.Debug().Interface("msg", msg)
 
-	output, err := utils.CallFunctionByName(FuncMap, msg.Cmd, nil)
+	output, err := utils.CallFunctionByName(ctx, FuncMap, msg.Cmd, msg)
 	if err != nil {
 		log.Error().Err(err).
 			Msg("error executing command")
 		return
 	}
 
-	data, err := json.Marshal(output)
+	response, ok := output[0].Interface().(Message)
+	if !ok {
+		log.Error().Msg("unexpected response type")
+		return
+	}
+
+	data, err := EncodeMessage(response)
 	if err != nil {
 		log.Error().Err(err).
 			Msg("error marshaling response")

@@ -1,21 +1,24 @@
 package obstacle_avoidance
 
 import (
+	"context"
 	"droneOS/internal/config"
+	"droneOS/internal/drivers/sensor"
+	"droneOS/internal/drone"
 	"droneOS/internal/drone/control"
-	"droneOS/internal/drone/input/sensor"
-	"droneOS/internal/drone/output"
-	"github.com/rs/zerolog/log"
 	"math/rand"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 func Main(
+	ctx context.Context,
 	s *config.Config,
 	priority int,
 	priorityMutex *control.PriorityMutex,
 	sensorEvents *chan sensor.Event,
-	taskQueue *chan output.Task,
+	taskQueue *chan drone.Task,
 ) {
 	motor := "hawks_work_ESC"
 	for {
@@ -24,7 +27,7 @@ func Main(
 
 		priorityMutex.Lock(priority)
 
-		task := output.Task{
+		task := drone.Task{
 			Name: motor,
 			Data: 0,
 		}

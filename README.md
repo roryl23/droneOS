@@ -152,7 +152,7 @@ Logs can be filtered with [jq](https://jqlang.github.io/jq/download):
 * Go libraries
   * https://github.com/warthog618/go-gpiocdev
   * https://gobot.io/documentation/drivers
-  * https://github.com/tinygo-org/drivers/tree/release/sx126x
+  * https://github.com/tinygo-org/drivers
   * https://github.com/thinkski/go-v4l2
 
 #### Contributing

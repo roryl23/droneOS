@@ -12,7 +12,7 @@ type BaseConfig struct {
 	Host       string `yaml:"host"`
 	Port       int    `yaml:"port"`
 	Controller string `yaml:"controller"`
-	Radio      string `yaml:"radio"`
+	Radio      Radio  `yaml:"radio"`
 }
 
 type Device struct {

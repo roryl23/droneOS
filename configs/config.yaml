@@ -1,5 +1,5 @@
 base:
-  host: 192.168.1.76
+  host: 192.168.0.243
   port: 7000
   controller: xbox360
   radio:
@@ -18,41 +18,11 @@ drone:
         - pins:
             - 1
             - 2
-#        - pins:
-#            - 3
-#            - 4
-#        - pins:
-#            - 5
-#            - 6
-#        - pins:
-#            - 7
-#            - 8
-#    - name: GT_U7
-#      config:
-#        - pins:
-#            - 9
-#            - 10
-#    - name: HC_SR04
-#      config:
-#        - pins:
-#            - 11
-#            - 12
-#    - name: MPU_6050
-#      config:
-#        - pins:
-#            - 13
-#            - 14
   outputs:
     - name: hawks_work_ESC
       config:
         - pins:
             - 15
             - 16
-#    - name: MG90S
-#      config:
-#        - pins:
-#            - 17
-#            - 18
   controlAlgorithmPriority:
     - obstacle_avoidance
-#    - pilot
