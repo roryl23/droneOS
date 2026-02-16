@@ -58,6 +58,19 @@ Your algorithm fundamentally needs to do these things:
 If you write more than one control algorithm, such as the default examples of `obstacle_avoidance` and `pilot`,
 you'll need to define their priority using `controlAlgorithmPriority` in `configs/config.yaml`.
 
+### Pi dev deploy (USB/SSH)
+
+Use the GoLand run config `base + pi` or run this from the repo root:
+
+```
+DRONEOS_PI_HOST=192.168.7.2 go run ./cmd/dev/pi_runner/main.go --config-file ./configs/config.yaml
+```
+
+The tool starts the base station locally, cross-compiles the drone binary, copies the binary and config to the Pi,
+then runs the drone binary over SSH. Override defaults with environment variables:
+`DRONEOS_PI_HOST`, `DRONEOS_PI_USER`, `DRONEOS_PI_PORT`, `DRONEOS_PI_DIR`, `DRONEOS_PI_ARCH`, `DRONEOS_PI_GOARM`,
+`DRONEOS_PI_CC`, `DRONEOS_PI_BIN`, `DRONEOS_PI_OUT`.
+
 ### Logging
 
 droneOS logs in a very specific format to allow the base station to know the whole state of the system.
