@@ -52,9 +52,9 @@ func parseFlags() config {
 	goarm := flag.String("goarm", envOr("DRONEOS_PI_GOARM", ""), "Target GOARM for Raspberry Pi (used when arch=arm)")
 	cc := flag.String("cc", envOr("DRONEOS_PI_CC", ""), "C compiler for CGO cross-compile")
 	piHost := flag.String("pi-host", envOr("DRONEOS_PI_HOST", "raspberrypi.local"), "Raspberry Pi SSH host or IP")
-	piUser := flag.String("pi-user", envOr("DRONEOS_PI_USER", "pi"), "Raspberry Pi SSH user")
+	piUser := flag.String("pi-user", envOr("DRONEOS_PI_USER", "root"), "Raspberry Pi SSH user (root required for /opt)")
 	piPort := flag.String("pi-port", envOr("DRONEOS_PI_PORT", "22"), "Raspberry Pi SSH port")
-	piDir := flag.String("pi-dir", envOr("DRONEOS_PI_DIR", "/home/pi/droneOS"), "Remote deploy directory")
+	piDir := flag.String("pi-dir", envOr("DRONEOS_PI_DIR", "/opt/droneOS"), "Remote deploy directory")
 	piBinName := flag.String("pi-bin-name", envOr("DRONEOS_PI_BIN", "drone.bin"), "Remote drone binary name")
 	output := flag.String("output", envOr("DRONEOS_PI_OUT", filepath.Join("build", "droneOS", "drone.pi")), "Local output path for drone binary")
 	goCmd := flag.String("go-cmd", envOr("DRONEOS_GO_CMD", "go"), "Go command to use")
@@ -101,6 +101,9 @@ func run(ctx context.Context, cfg config) error {
 	}
 	if err := requireCommand("scp"); err != nil {
 		return err
+	}
+	if requiresRoot(cfg.piDir) && strings.TrimSpace(cfg.piUser) != "root" {
+		return fmt.Errorf("pi-user must be root for %s deployments", cfg.piDir)
 	}
 
 	arch := normalizeArch(cfg.arch)
@@ -265,6 +268,11 @@ func shellEscape(value string) string {
 		return "''"
 	}
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func requiresRoot(remoteDir string) bool {
+	dir := path.Clean(strings.TrimSpace(remoteDir))
+	return dir == "/opt" || strings.HasPrefix(dir, "/opt/")
 }
 
 func requireFile(path string) error {

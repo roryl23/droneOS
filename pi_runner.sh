@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # usage examples:
 #   bash pi_runner.sh
-#   DRONEOS_PI_HOST=192.168.0.108 DRONEOS_PI_USER=pi bash pi_runner.sh ./configs/config.yaml --pi-dir /home/pi/droneOS
+#   DRONEOS_PI_HOST=192.168.0.108 bash pi_runner.sh ./configs/config.yaml
 
 set -euo pipefail
 
@@ -25,7 +25,7 @@ PI_USER="${DRONEOS_PI_USER:-pi}"
 PI_PORT="${DRONEOS_PI_PORT:-22}"
 PI_DIR="${DRONEOS_PI_DIR:-/home/pi/droneOS}"
 PI_BIN="${DRONEOS_PI_BIN:-drone.bin}"
-OUTPUT="${DRONEOS_PI_OUT:-${PROJECT_DIR}/build/droneOS/drone.pi}"
+OUTPUT="${DRONEOS_PI_OUT:-${PROJECT_DIR}/build/droneOS/drone.bin}"
 GO_CMD="${DRONEOS_GO_CMD:-go}"
 
 ARGS=(

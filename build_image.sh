@@ -18,10 +18,17 @@ SSID=${6:-"droneos"}
 SSID_PASSWORD=${7:-"X0YhW2Wy2bmtKXkT2ST61v2SdBk4FGgE"}
 
 # local variables
-THREADS=4
+THREADS=12
 PROJECT_DIR=$PWD
 BUILD_DIR=$PROJECT_DIR/build
 RPI_LINUX_BRANCH=rpi-6.6.y
+RT_PATCH_VERSION=6.6.78-rt51
+RT_PATCH_BASE="${RT_PATCH_VERSION%-rt*}"
+RT_PATCH_TARBALL="patches-${RT_PATCH_VERSION}.tar.gz"
+RT_PATCH_URL="https://cdn.kernel.org/pub/linux/kernel/projects/rt/6.6/older/${RT_PATCH_TARBALL}"
+RT_PATCH_DIR="${BUILD_DIR}/patches"
+RT_PATCH_EXTRACT_MARKER="${RT_PATCH_DIR}/.rt_patch_version"
+RT_PATCH_MARKER="${BUILD_DIR}/linux/.rt_patched_${RT_PATCH_VERSION}"
 SD_CARD_BOOT_DEVICE="${SD_CARD}1"
 SD_CARD_ROOT_DEVICE="${SD_CARD}2"
 SD_CARD_BOOT_DIR=$BUILD_DIR/linux/mnt/rpi_boot
@@ -34,28 +41,53 @@ else
 fi
 
 # get kernel source and configure
-if ! [ -d "build/linux" ]; then
+if ! [ -d "${BUILD_DIR}/linux/.git" ]; then
+  if [ -d "${BUILD_DIR}/linux" ]; then
+    echo "build/linux exists but is not a git repo; remove it to re-clone"
+    exit 1
+  fi
   echo "downloading Linux source..."
-  mkdir -p build && \
-  cd "${BUILD_DIR}" && \
-  git clone --depth=1 https://github.com/raspberrypi/linux && \
-  git checkout $RPI_LINUX_BRANCH
+  mkdir -p "${BUILD_DIR}" && \
+  git clone --depth=1 --branch "${RPI_LINUX_BRANCH}" https://github.com/raspberrypi/linux "${BUILD_DIR}/linux"
   cd "$PROJECT_DIR"
+else
+  CURRENT_LINUX_BRANCH=$(git -C "${BUILD_DIR}/linux" rev-parse --abbrev-ref HEAD)
+  if [[ "${CURRENT_LINUX_BRANCH}" != "${RPI_LINUX_BRANCH}" ]]; then
+    echo "linux source is on ${CURRENT_LINUX_BRANCH}; expected ${RPI_LINUX_BRANCH}. Remove build/linux or update RPI_LINUX_BRANCH."
+    exit 1
+  fi
 fi
 # get real time kernel patch
-if ! [ -d "build/patches" ]; then
+if ! [ -f "${RT_PATCH_MARKER}" ]; then
   cd "${BUILD_DIR}"
-  if ! [ -f "patches-6.6.48-rt40.tar.gz" ]; then
+  if ! [ -f "${RT_PATCH_TARBALL}" ]; then
     echo "downloading real-time kernel patch..."
-    wget https://cdn.kernel.org/pub/linux/kernel/projects/rt/6.6/older/patches-6.6.48-rt40.tar.gz
+    wget "${RT_PATCH_URL}"
   fi
-  echo "extracting real-time kernel patch"
-  tar -xf patches-6.6.48-rt40.tar.gz && \
+  if [ -d "${RT_PATCH_DIR}" ]; then
+    if [ ! -f "${RT_PATCH_EXTRACT_MARKER}" ] || [ "$(cat "${RT_PATCH_EXTRACT_MARKER}")" != "${RT_PATCH_VERSION}" ]; then
+      rm -rf "${RT_PATCH_DIR}"
+    fi
+  fi
+  if ! [ -d "${RT_PATCH_DIR}" ]; then
+    echo "extracting real-time kernel patch"
+    tar -xf "${RT_PATCH_TARBALL}"
+    echo "${RT_PATCH_VERSION}" > "${RT_PATCH_EXTRACT_MARKER}"
+  fi
 
   echo "applying real-time kernel patch..."
-  cd linux && \
-  git am -3 ../patches/*
-  git am --skip
+  cd linux
+  KERNEL_VERSION=$(make -s kernelversion)
+  if [[ "${KERNEL_VERSION}" != "${RT_PATCH_BASE}" ]]; then
+    echo "kernel version ${KERNEL_VERSION} does not match RT patch base ${RT_PATCH_BASE}; update RT_PATCH_VERSION or RPI_LINUX_BRANCH"
+    exit 1
+  fi
+  if ! git am "${RT_PATCH_DIR}"/*.patch; then
+    git am --abort || true
+    echo "real-time kernel patch failed to apply"
+    exit 1
+  fi
+  touch "${RT_PATCH_MARKER}"
   cd "$PROJECT_DIR"
 fi
 
@@ -112,7 +144,7 @@ PASSWORD_ENCRYPTED=$(echo "$USER_PASSWORD" | openssl passwd -6 -stdin)
 echo "${USER_NAME}:${PASSWORD_ENCRYPTED}" | sudo tee "${SD_CARD_BOOT_DIR}"/userconf.txt && \
 sudo mkdir -p "${SD_CARD_ROOT_DIR}"/home/"${USER_NAME}" && \
 # set home directory permissions
-#sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/chown -Rv "${USER_NAME}":"${USER_NAME}" "${SD_CARD_ROOT_DIR}"/home/"${USER_NAME}"
+sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/chown -Rv "${USER_NAME}":"${USER_NAME}" "${SD_CARD_ROOT_DIR}"/home/"${USER_NAME}"
 # enable ssh
 sudo touch "${SD_CARD_BOOT_DIR}"/ssh
 
@@ -121,13 +153,18 @@ if [[ $TYPE == "base" ]]; then
   UNIT_FILE=$(cat <<EOF
 [Unit]
 Description=Start droneOS wifi network
-Requires=NetworkManager.service sys-subsystem-net-devices-wlan0.service
-After=NetworkManager.service sys-subsystem-net-devices-wlan0.service
+Wants=NetworkManager.service
+Requires=sys-subsystem-net-devices-wlan0.device
+After=NetworkManager.service sys-subsystem-net-devices-wlan0.device
 
 [Service]
-ExecStart=/usr/bin/nmcli device wifi hotspot ssid ${SSID} password ${SSID_PASSWORD}
 Type=oneshot
+ExecStartPre=/usr/bin/nmcli radio wifi on
+ExecStartPre=/usr/bin/nmcli device set wlan0 managed yes
+ExecStart=/usr/bin/nmcli device wifi hotspot ifname wlan0 ssid "${SSID}" password "${SSID_PASSWORD}"
 RemainAfterExit=yes
+Restart=on-failure
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
@@ -136,6 +173,7 @@ EOF
   echo "$UNIT_FILE" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/systemd/system/droneOSNetwork.service
   # chroot to filesystem and enable wifi startup script
   sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/ && \
+  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable NetworkManager.service' && \
   sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOSNetwork.service'
 elif [[ $TYPE == "drone" ]]; then
   UUID=$(uuidgen)
@@ -148,6 +186,7 @@ type=wifi
 interface-name=wlan0
 autoconnect=true
 autoconnect-retries=0
+autoconnect-priority=100
 
 [wifi]
 mode=infrastructure
@@ -162,12 +201,14 @@ psk=${SSID_PASSWORD}
 method=auto
 
 [ipv6]
-method=auto
+method=ignore
 EOF
 )
   echo "$NM_FILE" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections/"${SSID}".nmconnection && \
   sudo chmod -Rv 600 "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections/"${SSID}".nmconnection && \
   sudo chown -Rv root:root "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections/"${SSID}".nmconnection
+  sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/ && \
+  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable NetworkManager.service'
 fi
 cd "$PROJECT_DIR"
 
@@ -262,7 +303,8 @@ fi
 echo "$UNIT_FILE" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/systemd/system/droneOS.service && \
 # chroot to filesystem and enable wifi startup script
 sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/ && \
-sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOS.service'
+# TODO: this should be done in production mode, but not development
+#sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOS.service'
 
 # cleanup
 sudo umount /dev/"${SD_CARD_BOOT_DEVICE}"

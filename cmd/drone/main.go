@@ -275,6 +275,7 @@ func main() {
 
 	startWiFiPoller(ctx, &settings, wifiConnected)
 	startControllerPoller(ctx, &settings, wifiConnected)
+	drone.StartDeviceReporter(ctx, &settings, wifiConnected)
 
 	// initialize radio link (used for base comms when WiFi is unavailable)
 	radioLink, err := initRadioLink(ctx, settings.Drone.Radio.Name, &settings.Drone.Radio)

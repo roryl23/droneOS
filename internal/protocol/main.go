@@ -59,6 +59,7 @@ func CheckWiFi(
 // FuncMap Map of function names to functions
 var FuncMap = map[string]any{
 	"ping":           ping,
+	"device_state":   deviceState,
 	"debug_log":      debugLog,
 	"next_command":   nextControllerCommand,
 	"controller_ack": controllerAck,
