@@ -22,6 +22,11 @@ THREADS=12
 PROJECT_DIR=$PWD
 BUILD_DIR=$PROJECT_DIR/build
 RPI_LINUX_BRANCH=rpi-6.6.y
+RPI_OS_DATE=${RPI_OS_DATE:-2024-07-04}
+RPI_OS_SERIES=${RPI_OS_SERIES:-bookworm}
+RPI_OS_FLAVOR_BASE=${RPI_OS_FLAVOR_BASE:-raspios}
+RPI_OS_FLAVOR_DRONE=${RPI_OS_FLAVOR_DRONE:-raspios}
+RPI_OS_CACHE_DIR=${RPI_OS_CACHE_DIR:-/tmp}
 RT_PATCH_VERSION=6.6.78-rt51
 RT_PATCH_BASE="${RT_PATCH_VERSION%-rt*}"
 RT_PATCH_TARBALL="patches-${RT_PATCH_VERSION}.tar.gz"
@@ -103,35 +108,39 @@ sudo mkfs.ext4 -F /dev/"${SD_CARD_ROOT_DEVICE}"
 # determine which image to get
 if [[ "$KERNEL" == "kernel" || "$KERNEL" == "kernel7l" ]]; then
   if [[ "$TYPE" == "base" ]]; then
-    IMAGE_URL="https://downloads.raspberrypi.com/raspios_arm64/images/raspios_arm64-2024-07-04/2024-07-04-raspios-bookworm-arm64.img.xz"
-    IMAGE_FILE_XZ="2024-07-04-raspios-bookworm-arm64.img.xz"
-    IMAGE_FILE="2024-07-04-raspios-bookworm-arm64.img"
+    IMAGE_ARCH_DIR="raspios_arm64"
+    IMAGE_ARCH_SUFFIX="arm64"
+    IMAGE_FLAVOR="${RPI_OS_FLAVOR_BASE}"
   elif [[ "$TYPE" == "drone" ]]; then
-    IMAGE_URL="https://downloads.raspberrypi.com/raspios_lite_armhf/images/raspios_lite_armhf-2024-07-04/2024-07-04-raspios-bookworm-armhf-lite.img.xz"
-    IMAGE_FILE_XZ="2024-07-04-raspios-bookworm-armhf-lite.img.xz"
-    IMAGE_FILE="2024-07-04-raspios-bookworm-armhf-lite.img"
+    IMAGE_ARCH_DIR="raspios_lite_armhf"
+    IMAGE_ARCH_SUFFIX="armhf-lite"
+    IMAGE_FLAVOR="${RPI_OS_FLAVOR_DRONE}"
   fi
 elif [[ "$KERNEL" == "kernel8" ]]; then
   if [[ "$TYPE" == "base" ]]; then
-    IMAGE_URL="https://downloads.raspberrypi.com/raspios_arm64/images/raspios_arm64-2024-07-04/2024-07-04-raspios-bookworm-arm64.img.xz"
-    IMAGE_FILE_XZ="2024-07-04-raspios-bookworm-arm64.img.xz"
-    IMAGE_FILE="2024-07-04-raspios-bookworm-arm64.img"
+    IMAGE_ARCH_DIR="raspios_arm64"
+    IMAGE_ARCH_SUFFIX="arm64"
+    IMAGE_FLAVOR="${RPI_OS_FLAVOR_BASE}"
   elif [[ "$TYPE" == "drone" ]]; then
-    IMAGE_URL="https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2024-07-04/2024-07-04-raspios-bookworm-arm64-lite.img.xz"
-    IMAGE_FILE_XZ="2024-07-04-raspios-bookworm-arm64-lite.img.xz"
-    IMAGE_FILE="2024-07-04-raspios-bookworm-arm64-lite.img"
+    IMAGE_ARCH_DIR="raspios_lite_arm64"
+    IMAGE_ARCH_SUFFIX="arm64-lite"
+    IMAGE_FLAVOR="${RPI_OS_FLAVOR_DRONE}"
   fi
 fi
-if ! [ -f "$IMAGE_FILE_XZ" ]; then
+IMAGE_FILE_XZ="${RPI_OS_DATE}-${IMAGE_FLAVOR}-${RPI_OS_SERIES}-${IMAGE_ARCH_SUFFIX}.img.xz"
+IMAGE_FILE="${IMAGE_FILE_XZ%.xz}"
+IMAGE_URL="https://downloads.raspberrypi.com/${IMAGE_ARCH_DIR}/images/${IMAGE_ARCH_DIR}-${RPI_OS_DATE}/${IMAGE_FILE_XZ}"
+
+if ! [ -f "${RPI_OS_CACHE_DIR}/${IMAGE_FILE_XZ}" ]; then
   echo "downloading image..."
-  wget "$IMAGE_URL"
+  wget -O "${RPI_OS_CACHE_DIR}/${IMAGE_FILE_XZ}" "${IMAGE_URL}"
 fi
-if ! [ -f "$IMAGE_FILE" ]; then
+if ! [ -f "${RPI_OS_CACHE_DIR}/${IMAGE_FILE}" ]; then
   echo "decompressing image..."
-  xz --threads=${THREADS} --keep -d "$IMAGE_FILE_XZ"
+  xz --threads=${THREADS} --keep -d "${RPI_OS_CACHE_DIR}/${IMAGE_FILE_XZ}"
 fi
 echo "writing image to sd card..."
-sudo dd bs=1M if="$IMAGE_FILE" of=/dev/"${SD_CARD}" status=progress
+sudo dd bs=1M if="${RPI_OS_CACHE_DIR}/${IMAGE_FILE}" of=/dev/"${SD_CARD}" status=progress
 
 echo "filesystem and user configuration..."
 cd "${BUILD_DIR}"/linux && \
@@ -302,10 +311,11 @@ EOF
 fi
 echo "$UNIT_FILE" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/systemd/system/droneOS.service && \
 # chroot to filesystem and enable wifi startup script
-sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/ && \
+sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/
 # TODO: this should be done in production mode, but not development
 #sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOS.service'
 
 # cleanup
+sudo sync
 sudo umount /dev/"${SD_CARD_BOOT_DEVICE}"
 sudo umount /dev/"${SD_CARD_ROOT_DEVICE}"
