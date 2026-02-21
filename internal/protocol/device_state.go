@@ -12,6 +12,7 @@ type DeviceStateReport struct {
 	Timestamp int64          `json:"timestamp"`
 	USB       USBState       `json:"usb"`
 	GPIO      []GPIOPinState `json:"gpio"`
+	Devices   []DeviceProbe  `json:"devices"`
 	Errors    []string       `json:"errors,omitempty"`
 }
 
@@ -45,6 +46,32 @@ type GPIOPinState struct {
 	Value     *int   `json:"value,omitempty"`
 }
 
+type DeviceProbe struct {
+	Name   string           `json:"name"`
+	Kind   string           `json:"kind"`
+	Pins   []DeviceProbePin `json:"pins,omitempty"`
+	Detect DeviceDetect     `json:"detect"`
+}
+
+type DeviceDetect struct {
+	Status string `json:"status"`
+	Method string `json:"method,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+type DeviceProbePin struct {
+	Name      string `json:"name,omitempty"`
+	Chip      string `json:"chip,omitempty"`
+	Offset    int    `json:"offset,omitempty"`
+	Used      bool   `json:"used,omitempty"`
+	Consumer  string `json:"consumer,omitempty"`
+	Direction string `json:"direction,omitempty"`
+	ActiveLow *bool  `json:"activeLow,omitempty"`
+	Drive     string `json:"drive,omitempty"`
+	Bias      string `json:"bias,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
 func deviceState(ctx context.Context, msg Message) Message {
 	logger := zerolog.Ctx(ctx)
 	if msg.Data == "" {
@@ -62,6 +89,7 @@ func deviceState(ctx context.Context, msg Message) Message {
 		Int("drone_id", report.DroneID).
 		Int("usb_devices", len(report.USB.Devices)).
 		Int("gpio_pins", len(report.GPIO)).
+		Int("devices", len(report.Devices)).
 		Msg("device state report")
 
 	if len(report.Errors) > 0 {

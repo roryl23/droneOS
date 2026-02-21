@@ -1,6 +1,7 @@
 package drone
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"droneOS/internal/config"
+	"droneOS/internal/drivers/gpio"
 	"droneOS/internal/protocol"
 
 	"github.com/warthog618/go-gpiocdev"
@@ -15,10 +18,17 @@ import (
 
 const usbSysfsPath = "/sys/bus/usb/devices"
 
-func CollectDeviceState(droneID int) (protocol.DeviceStateReport, []error) {
+var defaultDetectRegistry = DefaultDetectRegistry()
+
+func CollectDeviceState(
+	ctx context.Context,
+	settings *config.Config,
+) (protocol.DeviceStateReport, []error) {
 	report := protocol.DeviceStateReport{
-		DroneID:   droneID,
 		Timestamp: time.Now().Unix(),
+	}
+	if settings != nil {
+		report.DroneID = settings.Drone.ID
 	}
 
 	var errs []error
@@ -35,11 +45,135 @@ func CollectDeviceState(droneID int) (protocol.DeviceStateReport, []error) {
 	}
 	report.GPIO = gpioPins
 
+	devices, deviceErrs := scanConfiguredDevices(ctx, settings, defaultDetectRegistry)
+	if len(deviceErrs) > 0 {
+		errs = append(errs, deviceErrs...)
+	}
+	report.Devices = devices
+
 	if len(errs) > 0 {
 		report.Errors = errorsToStrings(errs)
 	}
 
 	return report, errs
+}
+
+func scanConfiguredDevices(
+	ctx context.Context,
+	settings *config.Config,
+	registry *DetectRegistry,
+) ([]protocol.DeviceProbe, []error) {
+	if settings == nil {
+		return nil, nil
+	}
+	layout, err := gpio.LayoutByName(settings.Drone.GPIOLayout)
+	var errs []error
+	if err != nil {
+		errs = append(errs, err)
+		layout = gpio.DefaultLayout()
+	}
+
+	if registry == nil {
+		registry = defaultDetectRegistry
+	}
+
+	var probes []protocol.DeviceProbe
+
+	for i := range settings.Drone.Sensors {
+		device := &settings.Drone.Sensors[i]
+		probe, probeErrs := probeDevice(ctx, "sensor", device, layout, registry.DetectSensor)
+		if len(probeErrs) > 0 {
+			errs = append(errs, probeErrs...)
+		}
+		probes = append(probes, probe)
+	}
+
+	for i := range settings.Drone.Outputs {
+		device := &settings.Drone.Outputs[i]
+		probe, probeErrs := probeDevice(ctx, "output", device, layout, registry.DetectOutput)
+		if len(probeErrs) > 0 {
+			errs = append(errs, probeErrs...)
+		}
+		probes = append(probes, probe)
+	}
+
+	return probes, errs
+}
+
+type detectFunc func(context.Context, *config.Device, []gpio.ResolvedPin) DetectResult
+
+func probeDevice(
+	ctx context.Context,
+	kind string,
+	device *config.Device,
+	layout gpio.Layout,
+	detect detectFunc,
+) (protocol.DeviceProbe, []error) {
+	probe := protocol.DeviceProbe{
+		Name: device.Name,
+		Kind: kind,
+		Detect: protocol.DeviceDetect{
+			Status: string(DetectUnknown),
+			Method: "config",
+			Reason: "no device probe configured",
+		},
+	}
+
+	pinStatuses, pinErrs := gpio.InspectPins(layout, device.Pins)
+	if len(pinStatuses) > 0 {
+		probe.Pins = make([]protocol.DeviceProbePin, 0, len(pinStatuses))
+	}
+
+	resolvedPins := make([]gpio.ResolvedPin, 0, len(pinStatuses))
+	for _, status := range pinStatuses {
+		pin := protocol.DeviceProbePin{
+			Name:      status.Resolved.Name,
+			Chip:      status.Resolved.Chip,
+			Offset:    status.Resolved.Offset,
+			Used:      status.Used,
+			Consumer:  status.Consumer,
+			Direction: status.Resolved.Direction,
+			ActiveLow: status.Resolved.ActiveLow,
+			Drive:     status.Resolved.Drive,
+			Bias:      status.Resolved.Bias,
+		}
+		if status.Err != nil {
+			pin.Error = status.Err.Error()
+		} else {
+			resolvedPins = append(resolvedPins, status.Resolved)
+		}
+		probe.Pins = append(probe.Pins, pin)
+	}
+
+	if detect != nil {
+		result := detect(ctx, device, resolvedPins)
+		if result.Status == "" {
+			result.Status = DetectUnknown
+		}
+		if result.Method == "" {
+			result.Method = "config"
+		}
+		probe.Detect = protocol.DeviceDetect{
+			Status: string(result.Status),
+			Method: result.Method,
+			Reason: result.Reason,
+		}
+	}
+
+	if len(pinErrs) > 0 {
+		probe.Detect = protocol.DeviceDetect{
+			Status: string(DetectError),
+			Method: "gpio",
+			Reason: pinErrs[0].Error(),
+		}
+	} else if probe.Detect.Status == string(DetectUnknown) && len(device.Pins) > 0 {
+		probe.Detect.Method = "gpio"
+		if probe.Detect.Reason == "" || probe.Detect.Reason == "no device probe configured" {
+			probe.Detect.Reason = "pins inspected only"
+		}
+	}
+
+	return probe, pinErrs
 }
 
 func scanUSBDevices() ([]protocol.USBDevice, []error) {

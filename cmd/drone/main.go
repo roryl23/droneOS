@@ -64,6 +64,23 @@ type wifiDebugWriter struct {
 	droneID   int
 }
 
+type gpioPinLog struct {
+	Name           string `json:"name,omitempty"`
+	Scheme         string `json:"scheme,omitempty"`
+	Number         int    `json:"number,omitempty"`
+	ConfigChip     string `json:"configChip,omitempty"`
+	ConfigOffset   int    `json:"configOffset,omitempty"`
+	ResolvedChip   string `json:"resolvedChip,omitempty"`
+	ResolvedOffset int    `json:"resolvedOffset,omitempty"`
+	Direction      string `json:"direction,omitempty"`
+	ActiveLow      *bool  `json:"activeLow,omitempty"`
+	Bias           string `json:"bias,omitempty"`
+	Drive          string `json:"drive,omitempty"`
+	Used           bool   `json:"used,omitempty"`
+	Consumer       string `json:"consumer,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
 func newWiFiDebugWriter(ctx context.Context, status *atomic.Bool, addr string, droneID int) *wifiDebugWriter {
 	writer := &wifiDebugWriter{
 		ctx:       ctx,
@@ -113,6 +130,79 @@ func (w *wifiDebugWriter) loop() {
 				Data: msg,
 			})
 		}
+	}
+}
+
+func logGPIOPins(kind, name string, pins []config.Pin, statuses []gpio.PinStatus) {
+	if len(pins) == 0 {
+		return
+	}
+
+	logPins := make([]gpioPinLog, 0, len(pins))
+	for i, pin := range pins {
+		logPin := gpioPinLog{
+			Name:         pin.Name,
+			Scheme:       pin.Scheme,
+			Number:       pin.Number,
+			ConfigChip:   pin.Chip,
+			ConfigOffset: pin.Offset,
+			Direction:    pin.Direction,
+			ActiveLow:    pin.ActiveLow,
+			Bias:         pin.Bias,
+			Drive:        pin.Drive,
+		}
+		if i < len(statuses) {
+			status := statuses[i]
+			logPin.ResolvedChip = status.Resolved.Chip
+			logPin.ResolvedOffset = status.Resolved.Offset
+			logPin.Used = status.Used
+			logPin.Consumer = status.Consumer
+			if status.Err != nil {
+				logPin.Error = status.Err.Error()
+			}
+		}
+		logPins = append(logPins, logPin)
+	}
+
+	log.Debug().
+		Str("device", name).
+		Str("kind", kind).
+		Interface("pins", logPins).
+		Msg("gpio device config")
+}
+
+func preflightPins(layout gpio.Layout, kind, name string, pins []config.Pin) {
+	if len(pins) == 0 {
+		return
+	}
+
+	statuses, _ := gpio.ValidatePins(layout, pins)
+	logGPIOPins(kind, name, pins, statuses)
+	for _, status := range statuses {
+		if status.Err != nil {
+			log.Warn().Err(status.Err).
+				Str("device", name).
+				Str("kind", kind).
+				Str("chip", status.Resolved.Chip).
+				Int("offset", status.Resolved.Offset).
+				Msg("gpio pin validation failed")
+			continue
+		}
+		if status.Used {
+			log.Warn().
+				Str("device", name).
+				Str("kind", kind).
+				Str("chip", status.Resolved.Chip).
+				Int("offset", status.Resolved.Offset).
+				Str("consumer", status.Consumer).
+				Msg("gpio pin already in use")
+		}
+	}
+}
+
+func preflightDevices(layout gpio.Layout, kind string, devices []config.Device) {
+	for i := range devices {
+		preflightPins(layout, kind, devices[i].Name, devices[i].Pins)
 	}
 }
 
@@ -264,6 +354,16 @@ func main() {
 	log.Logger = log.Output(zerolog.MultiLevelWriter(os.Stdout, debugWriter))
 
 	log.Info().Interface("settings", settings)
+
+	layout, err := gpio.LayoutByName(settings.Drone.GPIOLayout)
+	if err != nil {
+		log.Warn().Err(err).Msg("invalid gpio layout; using default")
+		layout = gpio.DefaultLayout()
+	}
+
+	preflightDevices(layout, "sensor", settings.Drone.Sensors)
+	preflightDevices(layout, "output", settings.Drone.Outputs)
+	preflightPins(layout, "radio", settings.Drone.Radio.Name, settings.Drone.Radio.Pins)
 
 	chips := gpio.Init()
 	log.Info().Interface("chips", chips)

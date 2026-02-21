@@ -40,7 +40,7 @@ func StartDeviceReporter(
 			case <-ticker.C:
 			}
 
-			report, errs := CollectDeviceState(settings.Drone.ID)
+			report, errs := CollectDeviceState(ctx, settings)
 			if len(errs) > 0 {
 				log.Debug().Strs("errors", report.Errors).
 					Msg("device state collection errors")

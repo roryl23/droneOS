@@ -8,21 +8,28 @@ base:
     usbId: /dev/usb0
 drone:
   id: 1
+  gpioLayout: rpi-40
   radio:
     name: SX1262
     alwaysUse: False
     usbId: /dev/usb0
   sensors:
     - name: frienda_obstacle_431S
-      config:
-        - pins:
-            - 1
-            - 2
+      pins:
+        - name: pin1
+          scheme: bcm
+          number: 1
+        - name: pin2
+          scheme: bcm
+          number: 2
   outputs:
     - name: hawks_work_ESC
-      config:
-        - pins:
-            - 15
-            - 16
+      pins:
+        - name: pin1
+          scheme: bcm
+          number: 15
+        - name: pin2
+          scheme: bcm
+          number: 16
   controlAlgorithmPriority:
     - obstacle_avoidance

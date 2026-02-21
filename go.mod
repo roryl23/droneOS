@@ -9,6 +9,7 @@ require (
 	github.com/tarm/serial v0.0.0-20180830185346-98f6abe2eb07
 	github.com/warthog618/go-gpiocdev v0.9.0
 	gobot.io/x/gobot v1.16.0
+	golang.org/x/sys v0.32.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -21,6 +22,5 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sigurn/crc8 v0.0.0-20160107002456-e55481d6f45c // indirect
 	github.com/sigurn/utils v0.0.0-20190728110027-e1fefb11a144 // indirect
-	golang.org/x/sys v0.32.0 // indirect
 	periph.io/x/periph v3.6.2+incompatible // indirect
 )
