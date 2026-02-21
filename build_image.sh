@@ -191,6 +191,15 @@ fi
 # disable first-boot user prompts if present
 sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c \
   'systemctl disable userconf-pi.service userconf.service 2>/dev/null || true'
+# add user to device access groups if they exist
+if sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /usr/bin/id -u "${USER_NAME}" >/dev/null 2>&1; then
+  DEVICE_GROUPS=(dialout plugdev gpio i2c spi video input netdev)
+  for group in "${DEVICE_GROUPS[@]}"; do
+    if sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /usr/bin/getent group "$group" >/dev/null 2>&1; then
+      sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /usr/sbin/usermod -a -G "$group" "${USER_NAME}"
+    fi
+  done
+fi
 # enable ssh
 sudo touch "${SD_CARD_BOOT_DIR}"/ssh
 
