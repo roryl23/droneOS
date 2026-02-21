@@ -36,6 +36,8 @@ RT_PATCH_URL="https://cdn.kernel.org/pub/linux/kernel/projects/rt/6.6/older/${RT
 RT_PATCH_DIR="${BUILD_DIR}/patches"
 RT_PATCH_EXTRACT_MARKER="${RT_PATCH_DIR}/.rt_patch_version"
 RT_PATCH_MARKER="${BUILD_DIR}/linux/.rt_patched_${RT_PATCH_VERSION}"
+APPLY_RT_PATCH=${APPLY_RT_PATCH:-0}
+SKIP_KERNEL_BUILD=${SKIP_KERNEL_BUILD:-1}
 SD_CARD_BOOT_DEVICE="${SD_CARD}1"
 SD_CARD_ROOT_DEVICE="${SD_CARD}2"
 MOUNT_BASE=${MOUNT_BASE:-/tmp/droneos_mnt}
@@ -63,54 +65,60 @@ cleanup_on_exit() {
 trap cleanup_on_exit EXIT
 
 # get kernel source and configure
-if ! [ -d "${BUILD_DIR}/linux/.git" ]; then
-  if [ -d "${BUILD_DIR}/linux" ]; then
-    echo "build/linux exists but is not a git repo; remove it to re-clone"
-    exit 1
-  fi
-  echo "downloading Linux source..."
-  mkdir -p "${BUILD_DIR}" && \
-  git clone --depth=1 --branch "${RPI_LINUX_BRANCH}" https://github.com/raspberrypi/linux "${BUILD_DIR}/linux"
-  cd "$PROJECT_DIR"
-else
-  CURRENT_LINUX_BRANCH=$(git -C "${BUILD_DIR}/linux" rev-parse --abbrev-ref HEAD)
-  if [[ "${CURRENT_LINUX_BRANCH}" != "${RPI_LINUX_BRANCH}" ]]; then
-    echo "linux source is on ${CURRENT_LINUX_BRANCH}; expected ${RPI_LINUX_BRANCH}. Remove build/linux or update RPI_LINUX_BRANCH."
-    exit 1
-  fi
-fi
-# get real time kernel patch
-if ! [ -f "${RT_PATCH_MARKER}" ]; then
-  cd "${BUILD_DIR}"
-  if ! [ -f "${RT_PATCH_TARBALL}" ]; then
-    echo "downloading real-time kernel patch..."
-    wget "${RT_PATCH_URL}"
-  fi
-  if [ -d "${RT_PATCH_DIR}" ]; then
-    if [ ! -f "${RT_PATCH_EXTRACT_MARKER}" ] || [ "$(cat "${RT_PATCH_EXTRACT_MARKER}")" != "${RT_PATCH_VERSION}" ]; then
-      rm -rf "${RT_PATCH_DIR}"
+if [[ "${SKIP_KERNEL_BUILD}" -ne 1 ]]; then
+  if ! [ -d "${BUILD_DIR}/linux/.git" ]; then
+    if [ -d "${BUILD_DIR}/linux" ]; then
+      echo "build/linux exists but is not a git repo; remove it to re-clone"
+      exit 1
+    fi
+    echo "downloading Linux source..."
+    mkdir -p "${BUILD_DIR}" && \
+    git clone --depth=1 --branch "${RPI_LINUX_BRANCH}" https://github.com/raspberrypi/linux "${BUILD_DIR}/linux"
+    cd "$PROJECT_DIR"
+  else
+    CURRENT_LINUX_BRANCH=$(git -C "${BUILD_DIR}/linux" rev-parse --abbrev-ref HEAD)
+    if [[ "${CURRENT_LINUX_BRANCH}" != "${RPI_LINUX_BRANCH}" ]]; then
+      echo "linux source is on ${CURRENT_LINUX_BRANCH}; expected ${RPI_LINUX_BRANCH}. Remove build/linux or update RPI_LINUX_BRANCH."
+      exit 1
     fi
   fi
-  if ! [ -d "${RT_PATCH_DIR}" ]; then
-    echo "extracting real-time kernel patch"
-    tar -xf "${RT_PATCH_TARBALL}"
-    echo "${RT_PATCH_VERSION}" > "${RT_PATCH_EXTRACT_MARKER}"
-  fi
+  # get real time kernel patch
+  if [[ "${APPLY_RT_PATCH}" -eq 1 ]] && ! [ -f "${RT_PATCH_MARKER}" ]; then
+    cd "${BUILD_DIR}"
+    if ! [ -f "${RT_PATCH_TARBALL}" ]; then
+      echo "downloading real-time kernel patch..."
+      wget "${RT_PATCH_URL}"
+    fi
+    if [ -d "${RT_PATCH_DIR}" ]; then
+      if [ ! -f "${RT_PATCH_EXTRACT_MARKER}" ] || [ "$(cat "${RT_PATCH_EXTRACT_MARKER}")" != "${RT_PATCH_VERSION}" ]; then
+        rm -rf "${RT_PATCH_DIR}"
+      fi
+    fi
+    if ! [ -d "${RT_PATCH_DIR}" ]; then
+      echo "extracting real-time kernel patch"
+      tar -xf "${RT_PATCH_TARBALL}"
+      echo "${RT_PATCH_VERSION}" > "${RT_PATCH_EXTRACT_MARKER}"
+    fi
 
-  echo "applying real-time kernel patch..."
-  cd linux
-  KERNEL_VERSION=$(make -s kernelversion)
-  if [[ "${KERNEL_VERSION}" != "${RT_PATCH_BASE}" ]]; then
-    echo "kernel version ${KERNEL_VERSION} does not match RT patch base ${RT_PATCH_BASE}; update RT_PATCH_VERSION or RPI_LINUX_BRANCH"
-    exit 1
+    echo "applying real-time kernel patch..."
+    cd linux
+    KERNEL_VERSION=$(make -s kernelversion)
+    if [[ "${KERNEL_VERSION}" != "${RT_PATCH_BASE}" ]]; then
+      echo "kernel version ${KERNEL_VERSION} does not match RT patch base ${RT_PATCH_BASE}; update RT_PATCH_VERSION or RPI_LINUX_BRANCH"
+      exit 1
+    fi
+    if ! git am "${RT_PATCH_DIR}"/*.patch; then
+      git am --abort || true
+      echo "real-time kernel patch failed to apply"
+      exit 1
+    fi
+    touch "${RT_PATCH_MARKER}"
+    cd "$PROJECT_DIR"
+  elif [[ "${APPLY_RT_PATCH}" -ne 1 ]]; then
+    echo "skipping real-time kernel patch (APPLY_RT_PATCH=${APPLY_RT_PATCH})"
   fi
-  if ! git am "${RT_PATCH_DIR}"/*.patch; then
-    git am --abort || true
-    echo "real-time kernel patch failed to apply"
-    exit 1
-  fi
-  touch "${RT_PATCH_MARKER}"
-  cd "$PROJECT_DIR"
+else
+  echo "skipping custom kernel build (SKIP_KERNEL_BUILD=${SKIP_KERNEL_BUILD})"
 fi
 
 # determine which image to get
@@ -164,11 +172,10 @@ elif [[ $ARM == "arm" ]]; then
 fi
 
 echo "filesystem and user configuration..."
-cd "${BUILD_DIR}"/linux && \
-mkdir -p "${SD_CARD_BOOT_DIR}" && \
-mkdir -p "${SD_CARD_ROOT_DIR}" && \
-sudo mount /dev/"${SD_CARD_BOOT_DEVICE}" "${SD_CARD_BOOT_DIR}" && \
-sudo mount /dev/"${SD_CARD_ROOT_DEVICE}" "${SD_CARD_ROOT_DIR}" && \
+mkdir -p "${SD_CARD_BOOT_DIR}"
+mkdir -p "${SD_CARD_ROOT_DIR}"
+sudo mount /dev/"${SD_CARD_BOOT_DEVICE}" "${SD_CARD_BOOT_DIR}"
+sudo mount /dev/"${SD_CARD_ROOT_DEVICE}" "${SD_CARD_ROOT_DIR}"
 # create user in rootfs to avoid first-boot user setup
 PASSWORD_ENCRYPTED=$(echo "$USER_PASSWORD" | openssl passwd -6 -stdin)
 # preseed first-boot user configuration to avoid rename prompts
@@ -295,7 +302,7 @@ sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'syst
 cd "$PROJECT_DIR"
 
 echo "building Linux kernel..."
-if [ -d "build/linux" ]; then
+if [[ "${SKIP_KERNEL_BUILD}" -ne 1 ]] && [ -d "build/linux" ]; then
   # add configs for kernel build
   cd "${BUILD_DIR}"/linux && \
   cp "$PROJECT_DIR"/configs/.config . && \
