@@ -3,6 +3,7 @@ package protocol
 import (
 	"context"
 	"droneOS/internal/utils"
+	"time"
 
 	"github.com/rs/zerolog"
 )
@@ -19,9 +20,11 @@ func ServeRadio(ctx context.Context, link RadioLink) {
 		data, err := link.Receive()
 		if err != nil {
 			logger.Error().Err(err).Msg("radio receive failed")
+			time.Sleep(10 * time.Millisecond)
 			continue
 		}
 		if len(data) == 0 {
+			time.Sleep(10 * time.Millisecond)
 			continue
 		}
 

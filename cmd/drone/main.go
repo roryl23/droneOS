@@ -332,6 +332,7 @@ func initRadioLink(ctx context.Context, name string, cfg *config.Radio) (protoco
 
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	setLogLevelFromEnv()
 
 	configFile := flag.String(
 		"config-file",
@@ -368,10 +369,13 @@ func main() {
 	chips := gpio.Init()
 	log.Info().Interface("chips", chips)
 
-	// disable automatic garbage collection,
-	// we handle this in the perpetual loop below
-	debug.SetGCPercent(-1)
-	debug.SetMemoryLimit(math.MaxInt64)
+	// Optional GC disable for specialized profiling/tuning.
+	if strings.EqualFold(os.Getenv("DRONEOS_DISABLE_GC"), "1") ||
+		strings.EqualFold(os.Getenv("DRONEOS_DISABLE_GC"), "true") {
+		debug.SetGCPercent(-1)
+		debug.SetMemoryLimit(math.MaxInt64)
+		log.Warn().Msg("GC disabled (DRONEOS_DISABLE_GC=1)")
+	}
 
 	startWiFiPoller(ctx, &settings, wifiConnected)
 	startControllerPoller(ctx, &settings, wifiConnected)
@@ -485,5 +489,30 @@ func main() {
 			}(task)
 			runtime.GC()
 		}
+	}
+}
+
+func setLogLevelFromEnv() {
+	level := strings.TrimSpace(os.Getenv("DRONEOS_LOG_LEVEL"))
+	if level == "" {
+		level = "warn"
+	}
+	switch strings.ToLower(level) {
+	case "panic":
+		zerolog.SetGlobalLevel(zerolog.PanicLevel)
+	case "fatal":
+		zerolog.SetGlobalLevel(zerolog.FatalLevel)
+	case "error":
+		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
+	case "warn", "warning":
+		zerolog.SetGlobalLevel(zerolog.WarnLevel)
+	case "info":
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	case "debug":
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	case "trace":
+		zerolog.SetGlobalLevel(zerolog.TraceLevel)
+	default:
+		zerolog.SetGlobalLevel(zerolog.WarnLevel)
 	}
 }

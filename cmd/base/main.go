@@ -26,8 +26,8 @@ var RadioFuncMap = map[string]any{
 }
 
 func radio(ctx context.Context, s *config.Config) {
-	// Start TCP server
-	addr := fmt.Sprintf("%s:%d", s.Base.Host, s.Base.Port)
+	// Start TCP server - bind to all interfaces (0.0.0.0)
+	addr := fmt.Sprintf("0.0.0.0:%d", s.Base.Port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatal().Err(err).

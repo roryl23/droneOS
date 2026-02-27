@@ -5,14 +5,16 @@ base:
   radio:
     name: SX1262
     alwaysUse: False
-    usbId: /dev/usb0
+    usbId: auto
+    usbScan: true
 drone:
   id: 1
   gpioLayout: rpi-40
   radio:
     name: SX1262
     alwaysUse: False
-    usbId: /dev/usb0
+    usbId: auto
+    usbScan: true
   sensors:
     - name: frienda_obstacle_431S
       pins:

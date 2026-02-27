@@ -137,6 +137,9 @@ func run(ctx context.Context, cfg config) error {
 	if err := ensureRemoteDir(ctx, projectDir, cfg); err != nil {
 		return err
 	}
+	if err := stopRemote(ctx, projectDir, cfg); err != nil {
+		return err
+	}
 	if err := copyFiles(ctx, projectDir, cfg); err != nil {
 		return err
 	}
@@ -211,7 +214,11 @@ func buildDrone(ctx context.Context, projectDir string, cfg config) error {
 
 func ensureRemoteDir(ctx context.Context, projectDir string, cfg config) error {
 	sshHost := formatSSHHost(cfg.piUser, cfg.piHost)
-	cmd := exec.CommandContext(ctx, "ssh", "-p", cfg.piPort, sshHost, "mkdir -p "+shellEscape(cfg.piDir))
+	cmd := exec.CommandContext(ctx, "ssh",
+		"-o", "ControlMaster=auto",
+		"-o", "ControlPath=/tmp/ssh-%r@%h:%p",
+		"-o", "ControlPersist=300",
+		"-p", cfg.piPort, sshHost, "mkdir -p "+shellEscape(cfg.piDir))
 	cmd.Dir = projectDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -224,14 +231,57 @@ func ensureRemoteDir(ctx context.Context, projectDir string, cfg config) error {
 
 func copyFiles(ctx context.Context, projectDir string, cfg config) error {
 	sshHost := formatSSHHost(cfg.piUser, cfg.piHost)
-	target := fmt.Sprintf("%s:%s/", sshHost, cfg.piDir)
-	cmd := exec.CommandContext(ctx, "scp", "-P", cfg.piPort, cfg.output, cfg.droneConfigFile, target)
+	remoteBin := path.Join(cfg.piDir, cfg.piBinName)
+	remoteConfig := path.Join(cfg.piDir, filepath.Base(cfg.droneConfigFile))
+
+	cmd := exec.CommandContext(ctx, "scp",
+		"-o", "ControlMaster=auto",
+		"-o", "ControlPath=/tmp/ssh-%r@%h:%p",
+		"-o", "ControlPersist=300",
+		"-P", cfg.piPort, cfg.output, fmt.Sprintf("%s:%s", sshHost, remoteBin))
 	cmd.Dir = projectDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("copy files: %w", err)
+		return fmt.Errorf("copy drone binary: %w", err)
+	}
+
+	cmd = exec.CommandContext(ctx, "scp",
+		"-o", "ControlMaster=auto",
+		"-o", "ControlPath=/tmp/ssh-%r@%h:%p",
+		"-o", "ControlPersist=300",
+		"-P", cfg.piPort, cfg.droneConfigFile, fmt.Sprintf("%s:%s", sshHost, remoteConfig))
+	cmd.Dir = projectDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("copy drone config: %w", err)
+	}
+	return nil
+}
+
+func stopRemote(ctx context.Context, projectDir string, cfg config) error {
+	sshHost := formatSSHHost(cfg.piUser, cfg.piHost)
+	cmd := exec.CommandContext(
+		ctx,
+		"ssh",
+		"-o", "ControlMaster=auto",
+		"-o", "ControlPath=/tmp/ssh-%r@%h:%p",
+		"-o", "ControlPersist=300",
+		"-p",
+		cfg.piPort,
+		sshHost,
+		"sudo systemctl stop droneOS.service || true",
+	)
+	cmd.Dir = projectDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: stop remote drone failed: %v\n", err)
+		return nil
 	}
 	return nil
 }
@@ -239,10 +289,13 @@ func copyFiles(ctx context.Context, projectDir string, cfg config) error {
 func runRemote(ctx context.Context, projectDir string, cfg config) error {
 	sshHost := formatSSHHost(cfg.piUser, cfg.piHost)
 	remoteBin := path.Join(cfg.piDir, cfg.piBinName)
-	remoteConfig := path.Join(cfg.piDir, filepath.Base(cfg.droneConfigFile))
-	remoteCmd := fmt.Sprintf("chmod +x %s && %s --config-file %s", shellEscape(remoteBin), shellEscape(remoteBin), shellEscape(remoteConfig))
+	remoteCmd := fmt.Sprintf("chmod +x %s && sudo systemctl restart droneOS.service", shellEscape(remoteBin))
 
-	cmd := exec.CommandContext(ctx, "ssh", "-p", cfg.piPort, sshHost, remoteCmd)
+	cmd := exec.CommandContext(ctx, "ssh",
+		"-o", "ControlMaster=auto",
+		"-o", "ControlPath=/tmp/ssh-%r@%h:%p",
+		"-o", "ControlPersist=300",
+		"-p", cfg.piPort, sshHost, remoteCmd)
 	cmd.Dir = projectDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

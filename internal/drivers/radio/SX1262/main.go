@@ -7,11 +7,18 @@ import (
 	"context"
 	"droneOS/internal/config"
 	"droneOS/internal/protocol"
+	"encoding/binary"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/stianeikeland/go-rpio/v4"
 	"github.com/tarm/serial"
+	"github.com/warthog618/go-gpiocdev"
 )
 
 const (
@@ -26,37 +33,49 @@ const (
 
 type LoRaHAT struct {
 	serial *serial.Port
-	m0, m1 rpio.Pin
+	m0     *gpiocdev.Line
+	m1     *gpiocdev.Line
 	log    zerolog.Logger
 	mode   string // "config", "tx", "rx"
 }
 
-func NewLoRaHAT(ctx context.Context) (*LoRaHAT, error) {
+func NewLoRaHAT(ctx context.Context, serialDevice string, useGPIO bool) (*LoRaHAT, error) {
 	logger := zerolog.Ctx(ctx)
 
 	logger.Info().Msg("Initializing LoRa HAT on Raspberry Pi")
 
-	// Initialize GPIO
-	if err := rpio.Open(); err != nil {
-		logger.Error().Err(err).Msg("Failed to open GPIO")
-		return nil, err
-	}
-
 	// Configure mode pins
-	m0 := rpio.Pin(M0_PIN)
-	m1 := rpio.Pin(M1_PIN)
-	m0.Output()
-	m1.Output()
+	var m0 *gpiocdev.Line
+	var m1 *gpiocdev.Line
+	var err error
+	if useGPIO {
+		m0, err = gpiocdev.RequestLine("gpiochip0", M0_PIN, gpiocdev.AsOutput(0))
+		if err != nil {
+			logger.Error().Err(err).Msg("Failed to open GPIO line M0")
+			return nil, err
+		}
+		m1, err = gpiocdev.RequestLine("gpiochip0", M1_PIN, gpiocdev.AsOutput(0))
+		if err != nil {
+			_ = m0.Close()
+			logger.Error().Err(err).Msg("Failed to open GPIO line M1")
+			return nil, err
+		}
+	}
 
 	// Open serial port
 	cfg := &serial.Config{
-		Name: SERIAL_DEVICE,
+		Name: serialDevice,
 		Baud: BAUD_RATE,
 	}
 	ser, err := serial.OpenPort(cfg)
 	if err != nil {
-		rpio.Close()
-		logger.Error().Err(err).Str("device", SERIAL_DEVICE).Msg("Failed to open serial port")
+		if m0 != nil {
+			_ = m0.Close()
+		}
+		if m1 != nil {
+			_ = m1.Close()
+		}
+		logger.Error().Err(err).Str("device", serialDevice).Msg("Failed to open serial port")
 		return nil, err
 	}
 
@@ -87,19 +106,28 @@ func (h *LoRaHAT) setMode(mode string) {
 	h.mode = mode
 	switch mode {
 	case "config":
-		h.m0.Low()
-		h.m1.High()
+		h.setLine(h.m0, 0)
+		h.setLine(h.m1, 1)
 	case "tx", "rx":
-		h.m0.Low()
-		h.m1.Low()
+		h.setLine(h.m0, 0)
+		h.setLine(h.m1, 0)
 	default:
 		h.log.Warn().Str("mode", mode).Msg("Unknown mode, defaulting to TX")
-		h.m0.Low()
-		h.m1.Low()
+		h.setLine(h.m0, 0)
+		h.setLine(h.m1, 0)
 	}
 
 	time.Sleep(100 * time.Millisecond)
 	h.log.Debug().Str("mode", mode).Msg("Mode set")
+}
+
+func (h *LoRaHAT) setLine(line *gpiocdev.Line, value int) {
+	if line == nil {
+		return
+	}
+	if err := line.SetValue(value); err != nil {
+		h.log.Error().Err(err).Msg("Failed to set GPIO line")
+	}
 }
 
 func (h *LoRaHAT) configureLoRa() error {
@@ -125,6 +153,12 @@ func (h *LoRaHAT) configureLoRa() error {
 	}
 
 	time.Sleep(100 * time.Millisecond)
+
+	// Flush any echo or response from the configuration command
+	if err := h.serial.Flush(); err != nil {
+		h.log.Warn().Err(err).Msg("Failed to flush serial buffer after config")
+	}
+
 	h.log.Info().
 		Msg("LoRa configuration sent")
 	return nil
@@ -148,28 +182,53 @@ func (h *LoRaHAT) Send(data []byte) error {
 }
 
 func (h *LoRaHAT) Receive() ([]byte, error) {
-	buf := make([]byte, 256)
-	n, err := h.serial.Read(buf)
-	if err != nil {
+	// Read the 4-byte length prefix
+	lengthBytes := make([]byte, 4)
+	if _, err := io.ReadFull(h.serial, lengthBytes); err != nil {
+		if err == io.EOF {
+			return []byte{}, nil
+		}
 		return nil, err
 	}
 
-	data := make([]byte, n)
-	copy(data, buf[:n])
-
-	if n > 0 {
-		h.log.Info().
-			Str("payload", string(data)).
-			Int("length", n).
-			Msg("LoRa packet received")
+	// Parse the length
+	length := binary.BigEndian.Uint32(lengthBytes)
+	if length == 0 || length > 64*1024 {
+		h.log.Warn().Uint32("length", length).Msg("Invalid frame length received")
+		// Try to recover by flushing the buffer
+		_ = h.serial.Flush()
+		return []byte{}, nil
 	}
 
-	return data, nil
+	// Read the complete payload
+	payload := make([]byte, length)
+	if _, err := io.ReadFull(h.serial, payload); err != nil {
+		h.log.Error().Err(err).Uint32("expected", length).Msg("Failed to read complete payload")
+		return nil, err
+	}
+
+	// Return the complete frame (length prefix + payload)
+	frame := make([]byte, 4+length)
+	copy(frame[:4], lengthBytes)
+	copy(frame[4:], payload)
+
+	h.log.Info().
+		Int("length", len(frame)).
+		Msg("LoRa packet received")
+
+	return frame, nil
 }
 
 func (h *LoRaHAT) Close() {
-	h.serial.Close()
-	rpio.Close()
+	if h.serial != nil {
+		_ = h.serial.Close()
+	}
+	if h.m0 != nil {
+		_ = h.m0.Close()
+	}
+	if h.m1 != nil {
+		_ = h.m1.Close()
+	}
 	h.log.Info().Msg("LoRa HAT resources cleaned up")
 }
 
@@ -179,7 +238,12 @@ func Main(
 ) (protocol.RadioLink, error) {
 	logger := zerolog.Ctx(ctx)
 
-	hat, err := NewLoRaHAT(ctx)
+	serialDevice, useGPIO, err := resolveSerialDevice(s)
+	if err != nil {
+		logger.Error().Err(err).Msg("Failed to resolve LoRa serial device")
+		return nil, err
+	}
+	hat, err := NewLoRaHAT(ctx, serialDevice, useGPIO)
 	if err != nil {
 		logger.Error().Err(err).Msg("Failed to initialize LoRa HAT")
 		return nil, err
@@ -188,4 +252,79 @@ func Main(
 	logger.Info().Msg("LoRa HAT ready")
 	_ = s
 	return hat, nil
+}
+
+func resolveSerialDevice(cfg *config.Radio) (string, bool, error) {
+	if cfg == nil {
+		return SERIAL_DEVICE, true, nil
+	}
+	usbID := strings.TrimSpace(cfg.UsbId)
+	if isAutoUSB(usbID) || (usbID == "" && cfg.UsbScan) {
+		dev, err := findUSBSerialDevice()
+		if err != nil {
+			return "", false, err
+		}
+		return dev, false, nil
+	}
+	if usbID == "" {
+		return SERIAL_DEVICE, true, nil
+	}
+	info, err := os.Stat(usbID)
+	if err != nil {
+		return "", false, err
+	}
+	if info.Mode()&os.ModeCharDevice == 0 {
+		return "", false, fmt.Errorf("%s is not a character device", usbID)
+	}
+	return usbID, false, nil
+}
+
+func isAutoUSB(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "auto", "scan", "usb", "usb-auto", "usb-scan":
+		return true
+	default:
+		return false
+	}
+}
+
+func findUSBSerialDevice() (string, error) {
+	candidates := make([]string, 0, 8)
+
+	if entries, err := os.ReadDir("/dev/serial/by-id"); err == nil {
+		for _, entry := range entries {
+			candidates = append(candidates, filepath.Join("/dev/serial/by-id", entry.Name()))
+		}
+	}
+	if len(candidates) == 0 {
+		if matches, _ := filepath.Glob("/dev/ttyUSB*"); len(matches) > 0 {
+			candidates = append(candidates, matches...)
+		}
+		if matches, _ := filepath.Glob("/dev/ttyACM*"); len(matches) > 0 {
+			candidates = append(candidates, matches...)
+		}
+	}
+
+	valid := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		resolved := candidate
+		if info, err := os.Lstat(candidate); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if target, err := filepath.EvalSymlinks(candidate); err == nil {
+				resolved = target
+			}
+		}
+		info, err := os.Stat(resolved)
+		if err != nil {
+			continue
+		}
+		if info.Mode()&os.ModeCharDevice == 0 {
+			continue
+		}
+		valid = append(valid, candidate)
+	}
+	if len(valid) == 0 {
+		return "", fmt.Errorf("no USB serial devices found")
+	}
+	sort.Strings(valid)
+	return valid[0], nil
 }

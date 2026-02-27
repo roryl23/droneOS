@@ -20,14 +20,25 @@ func Main(
 	sensorEvents *chan sensor.Event,
 	taskQueue *chan drone.Task,
 ) {
+	_ = ctx
+	_ = s
+	_ = sensorEvents
+	_ = taskQueue
+	lastLog := time.Time{}
 	for {
 		time.Sleep(time.Duration(rand.Intn(200-100+1)+100) * time.Millisecond)
 		priorityMutex.Lock(priority)
 
-		log.Info().Msg("controller algorithm pilot running")
+		if time.Since(lastLog) >= 5*time.Second {
+			log.Debug().Msg("controller algorithm pilot running")
+			lastLog = time.Now()
+		}
 		time.Sleep(time.Duration(rand.Intn(200-100+1)+100) * time.Millisecond)
 
 		priorityMutex.Unlock()
-		log.Info().Msg("controller algorithm pilot finished")
+		if time.Since(lastLog) >= 5*time.Second {
+			log.Debug().Msg("controller algorithm pilot finished")
+			lastLog = time.Now()
+		}
 	}
 }

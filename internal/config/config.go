@@ -38,6 +38,7 @@ type Radio struct {
 	AlwaysUse bool   `yaml:"alwaysUse"`
 	Pins      []Pin  `yaml:"pins,omitempty"`
 	UsbId     string `yaml:"usbId"`
+	UsbScan   bool   `yaml:"usbScan,omitempty"`
 }
 
 type DroneConfig struct {

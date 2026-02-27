@@ -20,10 +20,16 @@ func Main(
 	sensorEvents *chan sensor.Event,
 	taskQueue *chan drone.Task,
 ) {
+	_ = ctx
+	_ = s
 	motor := "hawks_work_ESC"
+	lastLog := time.Time{}
 	for {
 		sensorEvent := <-*sensorEvents
-		log.Info().Interface("sensorEvent", sensorEvent)
+		if time.Since(lastLog) >= 5*time.Second {
+			log.Debug().Interface("sensorEvent", sensorEvent)
+			lastLog = time.Now()
+		}
 
 		priorityMutex.Lock(priority)
 
