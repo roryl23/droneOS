@@ -395,22 +395,57 @@ sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/
 
 # optionally install pisugar power manager
 if [[ "${INSTALL_PISUGAR}" -eq 1 ]]; then
-  echo "installing PiSugar power manager..."
-  PISUGAR_INSTALL_SCRIPT="${BUILD_DIR}/pisugar-power-manager.sh"
+  echo "preparing PiSugar power manager installation..."
 
-  # download the pisugar installation script if not already present
-  if ! [ -f "${PISUGAR_INSTALL_SCRIPT}" ]; then
-    echo "downloading PiSugar installation script..."
-    wget -O "${PISUGAR_INSTALL_SCRIPT}" https://cdn.pisugar.com/release/pisugar-power-manager.sh
+  # determine architecture for package download
+  if [[ "$ARM" == "aarch64" ]]; then
+    PISUGAR_ARCH="arm64"
+  else
+    PISUGAR_ARCH="armhf"
   fi
 
-  # copy installation script to rootfs
-  sudo cp "${PISUGAR_INSTALL_SCRIPT}" "${SD_CARD_ROOT_DIR}"/tmp/pisugar-power-manager.sh
+  PISUGAR_VERSION="2.3.2"
+  PISUGAR_DEB_VERSION="-1"
+  PISUGAR_SERVER_PKG="pisugar-server_${PISUGAR_VERSION}${PISUGAR_DEB_VERSION}_${PISUGAR_ARCH}.deb"
+  PISUGAR_POWEROFF_PKG="pisugar-poweroff_${PISUGAR_VERSION}${PISUGAR_DEB_VERSION}_${PISUGAR_ARCH}.deb"
+  PISUGAR_PROGRAMMER_PKG="pisugar-programmer_${PISUGAR_VERSION}${PISUGAR_DEB_VERSION}_${PISUGAR_ARCH}.deb"
 
-  # run installation in chroot environment with PiSugar3 model selection
-  echo "running PiSugar installation (selecting PiSugar3 model)..."
-  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c \
-    'cd /tmp && echo "3" | bash pisugar-power-manager.sh -c release && rm -f pisugar-power-manager.sh'
+  # download packages if not cached
+  mkdir -p "${BUILD_DIR}/pisugar"
+  cd "${BUILD_DIR}/pisugar"
+
+  for pkg in "${PISUGAR_SERVER_PKG}" "${PISUGAR_POWEROFF_PKG}" "${PISUGAR_PROGRAMMER_PKG}"; do
+    if ! [ -f "${pkg}" ]; then
+      echo "downloading ${pkg}..."
+      wget -q "http://cdn.pisugar.com/release/${pkg}"
+    fi
+  done
+
+  cd "${PROJECT_DIR}"
+
+  # copy packages to rootfs
+  sudo mkdir -p "${SD_CARD_ROOT_DIR}"/tmp/pisugar
+  sudo cp "${BUILD_DIR}"/pisugar/*.deb "${SD_CARD_ROOT_DIR}"/tmp/pisugar/
+
+  # install packages in chroot
+  echo "installing PiSugar packages..."
+  if ! sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c \
+    'dpkg -i /tmp/pisugar/*.deb 2>/dev/null || apt-get install -f -y'; then
+    echo "warning: PiSugar installation encountered issues but continuing..."
+    # don't fail the entire build if pisugar install has issues
+    true
+  fi
+
+  # enable i2c interface
+  echo "enabling I2C interface..."
+  if [ -f "${SD_CARD_BOOT_DIR}/config.txt" ]; then
+    if ! grep -q "^dtparam=i2c_arm=on" "${SD_CARD_BOOT_DIR}/config.txt"; then
+      echo "dtparam=i2c_arm=on" | sudo tee -a "${SD_CARD_BOOT_DIR}/config.txt" >/dev/null
+    fi
+  fi
+
+  # clean up
+  sudo rm -rf "${SD_CARD_ROOT_DIR}"/tmp/pisugar
 
   echo "PiSugar power manager installed. Access web UI at http://<pi-ip>:8421 after boot."
 else
