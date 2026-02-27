@@ -3,6 +3,9 @@ set -euo pipefail
 
 # usage:
 # bash build_image.sh sd# kernel8 drone username userpassword ssid ssidpassword wifi_country
+#
+# Environment variables:
+# INSTALL_PISUGAR=1   Install PiSugar3 power manager (default: 0)
 
 # input parameters
 # lsblk will let you find the value for this parameter:
@@ -28,7 +31,7 @@ RPI_OS_DATE=${RPI_OS_DATE:-2024-07-04}
 RPI_OS_SERIES=${RPI_OS_SERIES:-bookworm}
 RPI_OS_FLAVOR_BASE=${RPI_OS_FLAVOR_BASE:-raspios}
 RPI_OS_FLAVOR_DRONE=${RPI_OS_FLAVOR_DRONE:-raspios}
-RPI_OS_CACHE_DIR=${RPI_OS_CACHE_DIR:-/tmp}
+RPI_OS_CACHE_DIR=${RPI_OS_CACHE_DIR:-${BUILD_DIR}}
 RT_PATCH_VERSION=6.6.78-rt51
 RT_PATCH_BASE="${RT_PATCH_VERSION%-rt*}"
 RT_PATCH_TARBALL="patches-${RT_PATCH_VERSION}.tar.gz"
@@ -38,6 +41,7 @@ RT_PATCH_EXTRACT_MARKER="${RT_PATCH_DIR}/.rt_patch_version"
 RT_PATCH_MARKER="${BUILD_DIR}/linux/.rt_patched_${RT_PATCH_VERSION}"
 APPLY_RT_PATCH=${APPLY_RT_PATCH:-0}
 SKIP_KERNEL_BUILD=${SKIP_KERNEL_BUILD:-1}
+INSTALL_PISUGAR=${INSTALL_PISUGAR:-0}
 SD_CARD_BOOT_DEVICE="${SD_CARD}1"
 SD_CARD_ROOT_DEVICE="${SD_CARD}2"
 MOUNT_BASE=${MOUNT_BASE:-/tmp/droneos_mnt}
@@ -388,5 +392,29 @@ echo "$UNIT_FILE" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/systemd/system/droneOS.se
 sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/
 # TODO: this should be done in production mode, but not development
 #sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOS.service'
+
+# optionally install pisugar power manager
+if [[ "${INSTALL_PISUGAR}" -eq 1 ]]; then
+  echo "installing PiSugar power manager..."
+  PISUGAR_INSTALL_SCRIPT="${BUILD_DIR}/pisugar-power-manager.sh"
+
+  # download the pisugar installation script if not already present
+  if ! [ -f "${PISUGAR_INSTALL_SCRIPT}" ]; then
+    echo "downloading PiSugar installation script..."
+    wget -O "${PISUGAR_INSTALL_SCRIPT}" https://cdn.pisugar.com/release/pisugar-power-manager.sh
+  fi
+
+  # copy installation script to rootfs
+  sudo cp "${PISUGAR_INSTALL_SCRIPT}" "${SD_CARD_ROOT_DIR}"/tmp/pisugar-power-manager.sh
+
+  # run installation in chroot environment with PiSugar3 model selection
+  echo "running PiSugar installation (selecting PiSugar3 model)..."
+  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c \
+    'cd /tmp && echo "3" | bash pisugar-power-manager.sh -c release && rm -f pisugar-power-manager.sh'
+
+  echo "PiSugar power manager installed. Access web UI at http://<pi-ip>:8421 after boot."
+else
+  echo "skipping PiSugar installation (INSTALL_PISUGAR=${INSTALL_PISUGAR})"
+fi
 
 # cleanup handled by trap on successful exit
