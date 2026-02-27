@@ -281,6 +281,7 @@ EOF
   sudo chown -Rv root:root "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections/"${SSID}".nmconnection
   sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/ && \
   sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable NetworkManager.service' && \
+  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable NetworkManager-wait-online.service' && \
   sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable ssh'
 fi
 
@@ -370,8 +371,8 @@ elif [[ $TYPE == "drone" ]]; then
   UNIT_FILE=$(cat <<'EOF'
 [Unit]
 Description=Start droneOS application
-Requires=network-online.service
-After=network-online.service
+After=network-online.target NetworkManager.service
+Wants=network-online.target
 
 [Service]
 Type=notify
