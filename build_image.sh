@@ -5,7 +5,10 @@ set -euo pipefail
 # bash build_image.sh sd# kernel8 drone username userpassword ssid ssidpassword wifi_country
 #
 # Environment variables:
-# INSTALL_PISUGAR=1   Install PiSugar3 power manager (default: 0)
+# BUILD_MODE=prod          Build mode: dev (default) or prod
+#                          - dev: droneOS service disabled, no overlayfs, for development
+#                          - prod: droneOS service enabled, overlayfs enabled, for production
+# INSTALL_PISUGAR=1        Install PiSugar3 power manager (default: 0)
 
 # input parameters
 # lsblk will let you find the value for this parameter:
@@ -42,6 +45,18 @@ RT_PATCH_MARKER="${BUILD_DIR}/linux/.rt_patched_${RT_PATCH_VERSION}"
 APPLY_RT_PATCH=${APPLY_RT_PATCH:-0}
 SKIP_KERNEL_BUILD=${SKIP_KERNEL_BUILD:-1}
 INSTALL_PISUGAR=${INSTALL_PISUGAR:-0}
+BUILD_MODE=${BUILD_MODE:-dev}
+
+# Set mode-specific defaults
+if [[ "${BUILD_MODE}" == "prod" ]]; then
+  ENABLE_OVERLAYFS=1
+  ENABLE_DRONEOS_SERVICE=1
+  echo "Production mode: OverlayFS enabled, droneOS service enabled"
+else
+  ENABLE_OVERLAYFS=0
+  ENABLE_DRONEOS_SERVICE=0
+  echo "Development mode: OverlayFS disabled, droneOS service disabled"
+fi
 SD_CARD_BOOT_DEVICE="${SD_CARD}1"
 SD_CARD_ROOT_DEVICE="${SD_CARD}2"
 MOUNT_BASE=${MOUNT_BASE:-/tmp/droneos_mnt}
@@ -391,8 +406,14 @@ fi
 echo "$UNIT_FILE" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/systemd/system/droneOS.service && \
 # chroot to filesystem and enable wifi startup script
 sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/
-# TODO: this should be done in production mode, but not development
-#sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOS.service'
+
+# Enable droneOS service based on build mode
+if [[ "${ENABLE_DRONEOS_SERVICE}" -eq 1 ]]; then
+  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOS.service'
+  echo "droneOS service enabled (will start on boot)"
+else
+  echo "droneOS service disabled (use pi_runner.sh or manually start for development)"
+fi
 
 # optionally install pisugar power manager
 if [[ "${INSTALL_PISUGAR}" -eq 1 ]]; then
@@ -451,6 +472,49 @@ if [[ "${INSTALL_PISUGAR}" -eq 1 ]]; then
   echo "PiSugar power manager installed. Access web UI at http://<pi-ip>:8421 after boot."
 else
   echo "skipping PiSugar installation (INSTALL_PISUGAR=${INSTALL_PISUGAR})"
+fi
+
+# enable OverlayFS (read-only root filesystem with RAM overlay)
+if [[ "${ENABLE_OVERLAYFS}" -eq 1 ]]; then
+  echo "enabling OverlayFS for read-only root filesystem..."
+
+  # Install overlayroot package in chroot
+  echo "installing overlayroot package..."
+  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c \
+    'apt-get update && apt-get install -y overlayroot' || {
+      echo "warning: overlayroot package installation failed"
+    }
+
+  # Configure overlayroot
+  sudo tee "${SD_CARD_ROOT_DIR}/etc/overlayroot.conf" >/dev/null <<'EOF'
+overlayroot="tmpfs"
+overlayroot_cfgdisk="disabled"
+EOF
+
+  # Create systemd service to enable overlayroot on first boot
+  sudo tee "${SD_CARD_ROOT_DIR}/etc/systemd/system/enable-overlayroot.service" >/dev/null <<'EOF'
+[Unit]
+Description=Enable OverlayFS Root Filesystem
+ConditionPathExists=!/var/lib/overlayroot-enabled
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'echo overlayroot=\"tmpfs\" > /etc/overlayroot.conf && touch /var/lib/overlayroot-enabled'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c \
+    'systemctl enable enable-overlayroot.service' || true
+
+  echo "OverlayFS will be enabled on first boot. Root filesystem will be read-only with changes in RAM."
+  echo "To disable: edit /etc/overlayroot.conf and set overlayroot=\"\" or disabled, then reboot"
+  echo "Note: Use 'sudo overlayroot-chroot' to make persistent changes when overlay is active"
+else
+  echo "skipping OverlayFS setup (BUILD_MODE=${BUILD_MODE})"
+  echo "To enable production mode with OverlayFS: BUILD_MODE=prod bash build_image.sh ..."
 fi
 
 # cleanup handled by trap on successful exit
