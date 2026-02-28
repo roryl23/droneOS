@@ -24,7 +24,6 @@ import (
 	"math"
 	"os"
 	"os/signal"
-	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync/atomic"
@@ -275,6 +274,8 @@ func startControllerPoller(ctx context.Context, settings *config.Config, status 
 				continue
 			}
 			if resp.Data == "" {
+				// No commands available - sleep to avoid tight loop
+				time.Sleep(50 * time.Millisecond)
 				continue
 			}
 			var cmd protocol.ControllerCommand
@@ -437,8 +438,9 @@ func main() {
 				&sensorEventChannels,
 			)
 			if err != nil {
-				log.Fatal().Err(err).
+				log.Error().Err(err).
 					Msg("error initializing sensors")
+				return
 			}
 		}()
 	}
@@ -459,8 +461,9 @@ func main() {
 				&taskQueue,
 			)
 			if err != nil {
-				log.Fatal().Err(err).
+				log.Error().Err(err).
 					Msg("error initializing control algorithms")
+				return
 			}
 		}()
 	}
@@ -483,11 +486,11 @@ func main() {
 					&taskQueue,
 				)
 				if err != nil {
-					log.Fatal().Err(err).Str("task", t.Name).
+					log.Error().Err(err).Str("task", t.Name).
 						Msg("error calling task")
 				}
 			}(task)
-			runtime.GC()
+			// Don't call runtime.GC() on every task - let Go manage memory
 		}
 	}
 }

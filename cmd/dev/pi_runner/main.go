@@ -289,7 +289,7 @@ func stopRemote(ctx context.Context, projectDir string, cfg config) error {
 func runRemote(ctx context.Context, projectDir string, cfg config) error {
 	sshHost := formatSSHHost(cfg.piUser, cfg.piHost)
 	remoteBin := path.Join(cfg.piDir, cfg.piBinName)
-	remoteCmd := fmt.Sprintf("chmod +x %s && sudo systemctl restart droneOS.service", shellEscape(remoteBin))
+	remoteCmd := fmt.Sprintf("chmod +x %s && sudo systemctl restart droneOS.service && echo 'droneOS service restarted'", shellEscape(remoteBin))
 
 	cmd := exec.CommandContext(ctx, "ssh",
 		"-o", "ControlMaster=auto",
@@ -299,13 +299,15 @@ func runRemote(ctx context.Context, projectDir string, cfg config) error {
 	cmd.Dir = projectDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return nil
 		}
-		return fmt.Errorf("run remote drone: %w", err)
+		return fmt.Errorf("restart remote drone service: %w", err)
 	}
+
+	fmt.Println("\n✓ Binary deployed and droneOS service restarted")
+	fmt.Printf("To view logs: ssh -p %s %s 'sudo journalctl -u droneOS.service -f'\n", cfg.piPort, sshHost)
 	return nil
 }
 

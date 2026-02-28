@@ -517,4 +517,46 @@ else
   echo "To enable production mode with OverlayFS: BUILD_MODE=prod bash build_image.sh ..."
 fi
 
+# Configure journald to reduce disk writes and prevent filesystem corruption
+echo "configuring journald for reduced disk I/O..."
+sudo mkdir -p "${SD_CARD_ROOT_DIR}/etc/systemd/journald.conf.d"
+sudo tee "${SD_CARD_ROOT_DIR}/etc/systemd/journald.conf.d/droneos.conf" >/dev/null <<'EOF'
+[Journal]
+# Store logs in RAM to reduce SD card wear
+Storage=volatile
+# Limit RAM usage for logs
+RuntimeMaxUse=50M
+# Reduce sync frequency to minimize disk writes
+SyncIntervalSec=60s
+# Rate limit to prevent log floods
+RateLimitIntervalSec=30s
+RateLimitBurst=10000
+EOF
+
+echo "journald configured for volatile storage (logs in RAM only)"
+
+# Add kernel parameters to improve filesystem stability
+echo "configuring kernel parameters for filesystem stability..."
+if [ -d "${SD_CARD_BOOT_DIR}/firmware" ]; then
+  BOOT_CONFIG_DIR="${SD_CARD_BOOT_DIR}/firmware"
+else
+  BOOT_CONFIG_DIR="${SD_CARD_BOOT_DIR}"
+fi
+
+if [ -f "${BOOT_CONFIG_DIR}/cmdline.txt" ]; then
+  # Add filesystem mount options for better stability
+  if ! grep -q "rootflags=commit=60" "${BOOT_CONFIG_DIR}/cmdline.txt"; then
+    sudo sed -i '1s/$/ rootflags=commit=60/' "${BOOT_CONFIG_DIR}/cmdline.txt"
+    echo "added rootflags=commit=60 to reduce filesystem sync frequency"
+  fi
+fi
+
+# Configure fstab to reduce writes
+echo "configuring fstab for reduced writes..."
+if [ -f "${SD_CARD_ROOT_DIR}/etc/fstab" ]; then
+  # Add noatime to root mount to reduce metadata writes
+  sudo sed -i 's|\(^[^#].*\s/\s.*\)defaults|\1defaults,noatime,commit=60|' "${SD_CARD_ROOT_DIR}/etc/fstab"
+  echo "added noatime and commit=60 to root filesystem mount options"
+fi
+
 # cleanup handled by trap on successful exit

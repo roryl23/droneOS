@@ -10,6 +10,7 @@ import (
 
 func ServeRadio(ctx context.Context, link RadioLink) {
 	logger := zerolog.Ctx(ctx)
+	consecutiveErrors := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -19,18 +20,26 @@ func ServeRadio(ctx context.Context, link RadioLink) {
 
 		data, err := link.Receive()
 		if err != nil {
-			logger.Error().Err(err).Msg("radio receive failed")
-			time.Sleep(10 * time.Millisecond)
+			consecutiveErrors++
+			// Only log every 100th error to avoid log spam
+			if consecutiveErrors%100 == 1 {
+				logger.Warn().Err(err).Int("count", consecutiveErrors).Msg("radio receive errors")
+			}
+			time.Sleep(50 * time.Millisecond)
 			continue
 		}
 		if len(data) == 0 {
-			time.Sleep(10 * time.Millisecond)
+			// No data available - sleep longer to reduce USB polling pressure
+			time.Sleep(50 * time.Millisecond)
 			continue
 		}
 
+		// Reset error counter on successful receive
+		consecutiveErrors = 0
+
 		msg, err := DecodeMessageBytes(data)
 		if err != nil {
-			logger.Error().Err(err).Msg("radio decode failed")
+			logger.Debug().Err(err).Msg("radio decode failed")
 			continue
 		}
 

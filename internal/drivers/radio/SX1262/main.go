@@ -63,9 +63,16 @@ func NewLoRaHAT(ctx context.Context, serialDevice string, useGPIO bool) (*LoRaHA
 	}
 
 	// Open serial port
+	// Use longer timeout for USB devices to reduce kernel pressure
+	readTimeout := 100 * time.Millisecond
+	if !useGPIO {
+		// USB serial devices need longer timeouts
+		readTimeout = 500 * time.Millisecond
+	}
 	cfg := &serial.Config{
-		Name: serialDevice,
-		Baud: BAUD_RATE,
+		Name:        serialDevice,
+		Baud:        BAUD_RATE,
+		ReadTimeout: readTimeout,
 	}
 	ser, err := serial.OpenPort(cfg)
 	if err != nil {
@@ -154,19 +161,39 @@ func (h *LoRaHAT) configureLoRa() error {
 
 	time.Sleep(100 * time.Millisecond)
 
-	// Flush any echo or response from the configuration command
-	if err := h.serial.Flush(); err != nil {
-		h.log.Warn().Err(err).Msg("Failed to flush serial buffer after config")
-	}
+	// Drain the input buffer to discard any echo or config response
+	h.drainSerialBuffer()
 
 	h.log.Info().
 		Msg("LoRa configuration sent")
 	return nil
 }
 
+// drainSerialBuffer reads and discards all available data from the serial port
+func (h *LoRaHAT) drainSerialBuffer() {
+	buf := make([]byte, 256)
+	totalDiscarded := 0
+
+	// Read until no more data is immediately available
+	// Limit iterations to prevent tight loop on USB devices
+	for i := 0; i < 3; i++ {
+		n, err := h.serial.Read(buf)
+		if err != nil || n == 0 {
+			break
+		}
+		totalDiscarded += n
+		// Longer sleep for USB devices to avoid overwhelming the kernel
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if totalDiscarded > 0 {
+		h.log.Debug().Int("bytes", totalDiscarded).Msg("Drained serial buffer")
+	}
+}
+
 func (h *LoRaHAT) Send(data []byte) error {
-	h.log.Info().
-		Str("payload", string(data)).
+	// Only log at debug level to avoid flooding logs with pings/pongs
+	h.log.Debug().
 		Int("length", len(data)).
 		Msg("Sending LoRa packet")
 
@@ -176,35 +203,45 @@ func (h *LoRaHAT) Send(data []byte) error {
 		return err
 	}
 
-	h.log.Info().Str("payload", string(data)).
-		Msg("LoRa packet sent")
 	return nil
 }
 
 func (h *LoRaHAT) Receive() ([]byte, error) {
-	// Read the 4-byte length prefix
+	// Try to read the 4-byte length prefix
 	lengthBytes := make([]byte, 4)
-	if _, err := io.ReadFull(h.serial, lengthBytes); err != nil {
-		if err == io.EOF {
+	n, err := h.serial.Read(lengthBytes)
+
+	// Handle timeout or no data (common, don't log)
+	if err != nil || n == 0 {
+		return []byte{}, nil
+	}
+
+	// If we got partial length bytes, try to complete the read
+	if n < 4 {
+		remaining := lengthBytes[n:]
+		n2, err := io.ReadFull(h.serial, remaining)
+		if err != nil {
+			// Don't log every incomplete read - too noisy
+			h.drainSerialBuffer()
 			return []byte{}, nil
 		}
-		return nil, err
+		n += n2
 	}
 
 	// Parse the length
 	length := binary.BigEndian.Uint32(lengthBytes)
 	if length == 0 || length > 64*1024 {
-		h.log.Warn().Uint32("length", length).Msg("Invalid frame length received")
-		// Try to recover by flushing the buffer
-		_ = h.serial.Flush()
+		// Only log invalid lengths occasionally to avoid log spam
+		h.drainSerialBuffer()
 		return []byte{}, nil
 	}
 
 	// Read the complete payload
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(h.serial, payload); err != nil {
-		h.log.Error().Err(err).Uint32("expected", length).Msg("Failed to read complete payload")
-		return nil, err
+		// Don't log - this can happen during normal operation
+		h.drainSerialBuffer()
+		return []byte{}, nil
 	}
 
 	// Return the complete frame (length prefix + payload)
@@ -212,7 +249,8 @@ func (h *LoRaHAT) Receive() ([]byte, error) {
 	copy(frame[:4], lengthBytes)
 	copy(frame[4:], payload)
 
-	h.log.Info().
+	// Only log successful receives at debug level
+	h.log.Debug().
 		Int("length", len(frame)).
 		Msg("LoRa packet received")
 

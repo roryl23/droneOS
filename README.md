@@ -1,36 +1,238 @@
 # droneOS
 
-A Go framework for remotely and automatically flying a drone.
+A Go-based real-time operating system for autonomous drone flight with remote control capabilities.
 
-NOTE: This project is unstable and currently under development
+> ⚠️ **Status:** This project is actively under development and unstable. Use at your own risk.
 
-## Usage
+## Table of Contents
 
-### Hardware
+- [Features](#features)
+- [Hardware Requirements](#hardware-requirements)
+- [Quick Start](#quick-start)
+- [Development](#development)
+  - [Initial Setup](#initial-setup)
+  - [Development Workflow](#development-workflow)
+  - [Building SD Card Images](#building-sd-card-images)
+  - [Testing on Hardware](#testing-on-hardware)
+- [Architecture](#architecture)
+- [Configuration](#configuration)
+- [Contributing](#contributing)
 
-* You'll need one RPi for the drone. 
-  To make your life easiest, get the newest RPi Zero 2 W
-* Realistically, you'll need a PC for the base station
-  * Technically, you can run this wherever you can get the software/hardware to work,
-    which is left as an exercise for the reader. I will say that cross-compiling SDL2
-    is extremely annoying and doesn't work right now because I'm a scrub.
-  * You'll need a radio communication module that plugs in via USB
-  * Joystick supported by gobot
+## Features
 
-### Software
+- **Real-time flight control** with pluggable control algorithms
+- **Dual communication** via WiFi (high-bandwidth) and LoRa radio (long-range fallback)
+- **Modular sensor/motor drivers** with hot-swappable plugins
+- **Remote debugging** with structured logging over WiFi
+- **Xbox 360 controller support** for manual piloting
+- **Obstacle avoidance** with multiple sensor types
+- **Base station** for remote monitoring and control
 
-* Install build dependencies: `bash setup.sh`
-* For each RPi, insert your SD card and run `lsblk` to find which `/dev/sd#` file it is:
+## Hardware Requirements
+
+### Drone
+- **Raspberry Pi Zero 2 W** (recommended) or any RPi with GPIO
+- **LoRa radio module** (USB, e.g., SX1262-based)
+- **Sensors** (optional):
+  - MPU-6050 IMU (gyroscope/accelerometer)
+  - HC-SR04 ultrasonic distance sensor
+  - GT-U7 GPS module
+  - Frienda IR obstacle sensor
+- **Motors/ESCs** for propulsion
+- **PiSugar3** power manager (optional, for battery monitoring)
+
+### Base Station
+- **PC** (Linux/macOS/Windows)
+- **LoRa radio module** (USB, matching drone's frequency)
+- **Xbox 360 controller** (optional, for manual control)
+
+## Quick Start
+
+### 1. Install Dependencies
+
+```bash
+bash setup.sh
 ```
-sdf           8:80   1  29.7G  0 disk 
-├─sdf1        8:81   1   512M  0 part /media/user/bootfs
-└─sdf2        8:82   1  29.2G  0 part /media/user/rootfs
+
+This installs Go, cross-compilation toolchains, and other build dependencies.
+
+### 2. Build Development Image
+
+```bash
+# Find your SD card (DO NOT skip this - wrong device = data loss!)
+lsblk
+
+# Unmount if mounted
+sudo umount /dev/sdb1 /dev/sdb2  # Replace sdb with your device
+
+# Build image (development mode)
+bash build_image.sh sdb kernel8 drone myuser mypassword MyWiFiSSID MyWiFiPassword US
 ```
-  * NOTE: running `lsblk` is important! Choosing the wrong drive will instantly wreck the filesystem!
-* Unmount the SD card if it's mounted: `sudo umount /dev/sd#1 && sudo umount /dev/sd#2`
-* Build the image like this: `bash build_image.sh sd# kernel8 drone username userpassword ssid ssidpassword`,
-  changing the parameters for your case.
-  * See the `build_image.sh` file for details on the parameter values
+
+**Parameters:**
+- `sdb` - SD card device (from `lsblk`)
+- `kernel8` - Kernel variant (kernel/kernel7l/kernel8 for different RPi models)
+- `drone` - Image type (drone or base)
+- `myuser` - Login username
+- `mypassword` - Login password
+- `MyWiFiSSID` - WiFi network name
+- `MyWiFiPassword` - WiFi password
+- `US` - WiFi country code
+
+### 3. Boot and Test
+
+Insert SD card into Raspberry Pi and power on. The drone will:
+1. Connect to WiFi (prints IP on console)
+2. Wait for commands from base station
+
+**Note:** Development mode has the droneOS service **disabled** by default - use `pi_runner.sh` for testing.
+
+## Development
+
+### Initial Setup
+
+```bash
+# Clone repository
+git clone https://github.com/roryl23/droneOS.git
+cd droneOS
+
+# Install dependencies
+bash setup.sh
+
+# Configure your drone
+cp configs/config.yaml configs/my_drone.yaml
+# Edit configs/my_drone.yaml with your hardware setup
+```
+
+### Development Workflow
+
+#### Option 1: Live Development with pi_runner.sh (Recommended)
+
+The fastest way to iterate - automatically builds, deploys, and restarts the drone:
+
+```bash
+# Set your Pi's IP address
+export DRONEOS_PI_HOST=192.168.0.34  # Replace with your Pi's IP
+
+# Run development server (starts base station + deploys to Pi)
+bash pi_runner.sh ./configs/config.yaml
+
+# Or use custom config
+bash pi_runner.sh ./configs/my_drone.yaml
+
+# The script will:
+# 1. Start base station locally
+# 2. Cross-compile drone binary for ARM64
+# 3. SCP binary + config to Pi
+# 4. Restart droneOS service on Pi
+```
+
+**Environment Variables:**
+```bash
+DRONEOS_PI_HOST=192.168.0.34     # Pi IP address
+DRONEOS_PI_USER=root             # SSH user (default: root)
+DRONEOS_PI_PORT=22               # SSH port
+DRONEOS_PI_DIR=/opt/droneOS      # Install directory on Pi
+DRONEOS_PI_ARCH=arm64            # Target architecture
+```
+
+#### Option 2: Manual Testing
+
+```bash
+# Build drone binary
+GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc \
+  go build -o drone.bin ./cmd/drone/main.go
+
+# Copy to Pi
+scp drone.bin root@192.168.0.34:/opt/droneOS/
+scp configs/config.yaml root@192.168.0.34:/opt/droneOS/
+
+# SSH to Pi and run manually
+ssh root@192.168.0.34
+cd /opt/droneOS
+./drone.bin --config-file config.yaml
+```
+
+#### Option 3: Run Base Station Only
+
+```bash
+# For testing base station without drone
+go run ./cmd/base/main.go --config-file ./configs/config.yaml
+```
+
+### Building SD Card Images
+
+#### Development Image (Default)
+
+For active development with frequent updates:
+
+```bash
+bash build_image.sh sdb kernel8 drone admin password MySSID MyPass US
+```
+
+- droneOS service **disabled** (doesn't start on boot)
+- No OverlayFS (filesystem is writable)
+- Use `pi_runner.sh` for deployment
+- Logs written to disk
+
+#### Production Image
+
+For deployed drones with filesystem protection:
+
+```bash
+BUILD_MODE=prod bash build_image.sh sdb kernel8 drone admin password MySSID MyPass US
+```
+
+- droneOS service **enabled** (starts on boot)
+- OverlayFS **enabled** (read-only root, changes in RAM)
+- Volatile journald (logs in RAM only)
+- Requires `sudo overlayroot-chroot` for persistent changes
+
+#### Optional Features
+
+```bash
+# Install PiSugar power manager
+INSTALL_PISUGAR=1 bash build_image.sh ...
+
+# Combine options
+BUILD_MODE=prod INSTALL_PISUGAR=1 bash build_image.sh ...
+```
+
+### Testing on Hardware
+
+#### View Logs
+
+```bash
+# Live logs from running drone
+ssh root@192.168.0.34 'sudo journalctl -u droneOS.service -f'
+
+# Filter specific log levels
+ssh root@192.168.0.34 'sudo journalctl -u droneOS.service -n 100' | jq 'select(.level == "error")'
+
+# Debug logs (only sent when WiFi connected)
+ssh root@192.168.0.34 'sudo journalctl -u droneOS.service -n 100' | jq 'select(.level == "debug")'
+```
+
+#### Common Issues
+
+**Filesystem becomes read-only:**
+- Caused by excessive I/O or power issues
+- Fixed in recent commits with volatile journald and optimized polling
+- Check power supply voltage (should be 5V ±0.25V)
+
+**WiFi not connecting:**
+```bash
+ssh root@192.168.0.34
+nmcli device wifi list
+nmcli connection up ShowMeWhatYouGot  # Your SSID
+```
+
+**Service not starting:**
+```bash
+ssh root@192.168.0.34
+sudo systemctl status droneOS.service
+sudo journalctl -u droneOS.service -n 50
+```
 
 ## Development
 
