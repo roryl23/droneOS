@@ -93,17 +93,27 @@ func NewLoRaHAT(ctx context.Context, serialDevice string, useGPIO bool) (*LoRaHA
 		log:    *logger,
 	}
 
-	// Set to configuration mode (M0=0, M1=1)
-	hat.setMode("config")
+	// Only configure via software if using GPIO mode
+	// In USB mode, the physical jumpers control M0/M1
+	if useGPIO {
+		logger.Info().Msg("Configuring LoRa in GPIO mode")
 
-	// Configure LoRa parameters (example configuration command)
-	if err := hat.configureLoRa(); err != nil {
-		hat.Close()
-		return nil, err
+		// Set to configuration mode (M0=LOW, M1=HIGH)
+		hat.setMode("config")
+
+		// Configure LoRa parameters
+		if err := hat.configureLoRa(); err != nil {
+			hat.Close()
+			return nil, err
+		}
+
+		// Set to transmission mode (M0=LOW, M1=LOW)
+		hat.setMode("tx")
+	} else {
+		logger.Info().Msg("LoRa in USB mode - ensure jumpers are set: UART=A, M0=GND, M1=GND for transmission")
+		// In USB mode, assume jumpers are physically set correctly
+		// No software configuration needed
 	}
-
-	// Set to normal mode (M0=0, M1=0)
-	hat.setMode("tx")
 
 	logger.Info().Msg("LoRa HAT initialized successfully")
 	return hat, nil
