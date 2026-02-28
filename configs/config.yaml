@@ -1,37 +1,40 @@
 base:
-  host: 192.168.0.243
+  host: 192.168.0.68
   port: 7000
   controller: xbox360
+  logLevel: debug
   radio:
     name: SX1262
     alwaysUse: False
-    usbId: auto
+    usbId: auto  # Base station uses USB mode
     usbScan: true
 drone:
   id: 1
   gpioLayout: rpi-40
+  enableLogging: false
+  logLevel: debug
   radio:
     name: SX1262
-    alwaysUse: False
-    usbId: auto
-    usbScan: true
-  sensors:
-    - name: frienda_obstacle_431S
-      pins:
-        - name: pin1
-          scheme: bcm
-          number: 1
-        - name: pin2
-          scheme: bcm
-          number: 2
-  outputs:
-    - name: hawks_work_ESC
-      pins:
-        - name: pin1
-          scheme: bcm
-          number: 15
-        - name: pin2
-          scheme: bcm
-          number: 16
-  controlAlgorithmPriority:
-    - obstacle_avoidance
+    alwaysUse: True  # Always use radio for testing, even when WiFi connected
+    usbId: ""  # Empty = use GPIO mode with hardware UART
+    usbScan: false
+  sensors: []
+#    - name: frienda_obstacle_431S
+#      pins:
+#        - name: pin1
+#          scheme: bcm
+#          number: 1
+#        - name: pin2
+#          scheme: bcm
+#          number: 2
+  outputs: []
+#    - name: hawks_work_ESC
+#      pins:
+#        - name: pin1
+#          scheme: bcm
+#          number: 15
+#        - name: pin2
+#          scheme: bcm
+#          number: 16
+  controlAlgorithmPriority: []
+#    - obstacle_avoidance

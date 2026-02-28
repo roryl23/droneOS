@@ -25,12 +25,12 @@ func ServeRadio(ctx context.Context, link RadioLink) {
 			if consecutiveErrors%100 == 1 {
 				logger.Warn().Err(err).Int("count", consecutiveErrors).Msg("radio receive errors")
 			}
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 		if len(data) == 0 {
 			// No data available - sleep longer to reduce USB polling pressure
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 

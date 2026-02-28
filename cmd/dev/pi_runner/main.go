@@ -56,7 +56,7 @@ func parseFlags() config {
 	piPort := flag.String("pi-port", envOr("DRONEOS_PI_PORT", "22"), "Raspberry Pi SSH port")
 	piDir := flag.String("pi-dir", envOr("DRONEOS_PI_DIR", "/opt/droneOS"), "Remote deploy directory")
 	piBinName := flag.String("pi-bin-name", envOr("DRONEOS_PI_BIN", "drone.bin"), "Remote drone binary name")
-	output := flag.String("output", envOr("DRONEOS_PI_OUT", filepath.Join("build", "droneOS", "drone.pi")), "Local output path for drone binary")
+	output := flag.String("output", envOr("DRONEOS_PI_OUT", filepath.Join("build", "droneOS", "drone.bin")), "Local output path for drone binary")
 	goCmd := flag.String("go-cmd", envOr("DRONEOS_GO_CMD", "go"), "Go command to use")
 
 	flag.Parse()
@@ -102,9 +102,8 @@ func run(ctx context.Context, cfg config) error {
 	if err := requireCommand("scp"); err != nil {
 		return err
 	}
-	if requiresRoot(cfg.piDir) && strings.TrimSpace(cfg.piUser) != "root" {
-		return fmt.Errorf("pi-user must be root for %s deployments", cfg.piDir)
-	}
+	// Allow non-root users with sudo access
+	needsSudo := requiresRoot(cfg.piDir) && strings.TrimSpace(cfg.piUser) != "root"
 
 	arch := normalizeArch(cfg.arch)
 	if arch == "" {
@@ -134,17 +133,29 @@ func run(ctx context.Context, cfg config) error {
 	if err := buildDrone(ctx, projectDir, cfg); err != nil {
 		return err
 	}
-	if err := ensureRemoteDir(ctx, projectDir, cfg); err != nil {
+	if err := ensureRemoteDir(ctx, projectDir, cfg, needsSudo); err != nil {
 		return err
 	}
 	if err := stopRemote(ctx, projectDir, cfg); err != nil {
 		return err
 	}
-	if err := copyFiles(ctx, projectDir, cfg); err != nil {
+	if err := copyFiles(ctx, projectDir, cfg, needsSudo); err != nil {
 		return err
 	}
 
-	return runRemote(ctx, projectDir, cfg)
+	if err := runRemote(ctx, projectDir, cfg, needsSudo); err != nil {
+		return err
+	}
+
+	// Keep base station running in foreground until interrupted
+	fmt.Println("\n✓ Base station running in foreground (Ctrl+C to stop)")
+	select {
+	case <-ctx.Done():
+		fmt.Println("\n✓ Shutting down base station...")
+		return nil
+	case err := <-baseCmd.done:
+		return fmt.Errorf("base station exited unexpectedly: %w", err)
+	}
 }
 
 func startBase(projectDir, goCmd, configFile string) (*processHandle, error) {
@@ -212,13 +223,17 @@ func buildDrone(ctx context.Context, projectDir string, cfg config) error {
 	return nil
 }
 
-func ensureRemoteDir(ctx context.Context, projectDir string, cfg config) error {
+func ensureRemoteDir(ctx context.Context, projectDir string, cfg config, needsSudo bool) error {
 	sshHost := formatSSHHost(cfg.piUser, cfg.piHost)
+	remoteCmd := "mkdir -p " + shellEscape(cfg.piDir)
+	if needsSudo {
+		remoteCmd = "sudo " + remoteCmd
+	}
 	cmd := exec.CommandContext(ctx, "ssh",
 		"-o", "ControlMaster=auto",
 		"-o", "ControlPath=/tmp/ssh-%r@%h:%p",
 		"-o", "ControlPersist=300",
-		"-p", cfg.piPort, sshHost, "mkdir -p "+shellEscape(cfg.piDir))
+		"-p", cfg.piPort, sshHost, remoteCmd)
 	cmd.Dir = projectDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -229,35 +244,84 @@ func ensureRemoteDir(ctx context.Context, projectDir string, cfg config) error {
 	return nil
 }
 
-func copyFiles(ctx context.Context, projectDir string, cfg config) error {
+func copyFiles(ctx context.Context, projectDir string, cfg config, needsSudo bool) error {
 	sshHost := formatSSHHost(cfg.piUser, cfg.piHost)
 	remoteBin := path.Join(cfg.piDir, cfg.piBinName)
 	remoteConfig := path.Join(cfg.piDir, filepath.Base(cfg.droneConfigFile))
 
-	cmd := exec.CommandContext(ctx, "scp",
-		"-o", "ControlMaster=auto",
-		"-o", "ControlPath=/tmp/ssh-%r@%h:%p",
-		"-o", "ControlPersist=300",
-		"-P", cfg.piPort, cfg.output, fmt.Sprintf("%s:%s", sshHost, remoteBin))
-	cmd.Dir = projectDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("copy drone binary: %w", err)
-	}
+	// If using sudo, copy to /tmp first, then move with sudo
+	if needsSudo {
+		tmpBin := "/tmp/" + cfg.piBinName
+		tmpConfig := "/tmp/" + filepath.Base(cfg.droneConfigFile)
 
-	cmd = exec.CommandContext(ctx, "scp",
-		"-o", "ControlMaster=auto",
-		"-o", "ControlPath=/tmp/ssh-%r@%h:%p",
-		"-o", "ControlPersist=300",
-		"-P", cfg.piPort, cfg.droneConfigFile, fmt.Sprintf("%s:%s", sshHost, remoteConfig))
-	cmd.Dir = projectDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("copy drone config: %w", err)
+		cmd := exec.CommandContext(ctx, "scp",
+			"-o", "ControlMaster=auto",
+			"-o", "ControlPath=/tmp/ssh-%r@%h:%p",
+			"-o", "ControlPersist=300",
+			"-P", cfg.piPort, cfg.output, fmt.Sprintf("%s:%s", sshHost, tmpBin))
+		cmd.Dir = projectDir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("copy drone binary to tmp: %w", err)
+		}
+
+		cmd = exec.CommandContext(ctx, "scp",
+			"-o", "ControlMaster=auto",
+			"-o", "ControlPath=/tmp/ssh-%r@%h:%p",
+			"-o", "ControlPersist=300",
+			"-P", cfg.piPort, cfg.droneConfigFile, fmt.Sprintf("%s:%s", sshHost, tmpConfig))
+		cmd.Dir = projectDir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("copy drone config to tmp: %w", err)
+		}
+
+		// Move files from /tmp to target directory with sudo
+		moveCmd := fmt.Sprintf("sudo mv %s %s && sudo mv %s %s",
+			shellEscape(tmpBin), shellEscape(remoteBin),
+			shellEscape(tmpConfig), shellEscape(remoteConfig))
+		cmd = exec.CommandContext(ctx, "ssh",
+			"-o", "ControlMaster=auto",
+			"-o", "ControlPath=/tmp/ssh-%r@%h:%p",
+			"-o", "ControlPersist=300",
+			"-p", cfg.piPort, sshHost, moveCmd)
+		cmd.Dir = projectDir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("move files to target dir: %w", err)
+		}
+	} else {
+		cmd := exec.CommandContext(ctx, "scp",
+			"-o", "ControlMaster=auto",
+			"-o", "ControlPath=/tmp/ssh-%r@%h:%p",
+			"-o", "ControlPersist=300",
+			"-P", cfg.piPort, cfg.output, fmt.Sprintf("%s:%s", sshHost, remoteBin))
+		cmd.Dir = projectDir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("copy drone binary: %w", err)
+		}
+
+		cmd = exec.CommandContext(ctx, "scp",
+			"-o", "ControlMaster=auto",
+			"-o", "ControlPath=/tmp/ssh-%r@%h:%p",
+			"-o", "ControlPersist=300",
+			"-P", cfg.piPort, cfg.droneConfigFile, fmt.Sprintf("%s:%s", sshHost, remoteConfig))
+		cmd.Dir = projectDir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("copy drone config: %w", err)
+		}
 	}
 	return nil
 }
@@ -286,10 +350,31 @@ func stopRemote(ctx context.Context, projectDir string, cfg config) error {
 	return nil
 }
 
-func runRemote(ctx context.Context, projectDir string, cfg config) error {
+func runRemote(ctx context.Context, projectDir string, cfg config, needsSudo bool) error {
 	sshHost := formatSSHHost(cfg.piUser, cfg.piHost)
 	remoteBin := path.Join(cfg.piDir, cfg.piBinName)
-	remoteCmd := fmt.Sprintf("chmod +x %s && sudo systemctl restart droneOS.service && echo 'droneOS service restarted'", shellEscape(remoteBin))
+
+	// Build the complete deployment command sequence
+	var remoteCmd string
+	if needsSudo {
+		remoteCmd = fmt.Sprintf(
+			"sudo systemctl stop droneOS.service && "+
+				"sudo chmod +x %s && "+
+				"sudo chown root:root %s && "+
+				"sudo systemctl start droneOS.service && "+
+				"echo 'droneOS service restarted successfully'",
+			shellEscape(remoteBin),
+			shellEscape(remoteBin),
+		)
+	} else {
+		remoteCmd = fmt.Sprintf(
+			"sudo systemctl stop droneOS.service && "+
+				"chmod +x %s && "+
+				"sudo systemctl start droneOS.service && "+
+				"echo 'droneOS service restarted successfully'",
+			shellEscape(remoteBin),
+		)
+	}
 
 	cmd := exec.CommandContext(ctx, "ssh",
 		"-o", "ControlMaster=auto",
@@ -303,10 +388,28 @@ func runRemote(ctx context.Context, projectDir string, cfg config) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		return fmt.Errorf("restart remote drone service: %w", err)
+		return fmt.Errorf("deploy and restart remote drone service: %w", err)
 	}
 
-	fmt.Println("\n✓ Binary deployed and droneOS service restarted")
+	// Give the service a moment to start
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify service started successfully
+	checkCmd := exec.CommandContext(ctx, "ssh",
+		"-o", "ControlMaster=auto",
+		"-o", "ControlPath=/tmp/ssh-%r@%h:%p",
+		"-o", "ControlPersist=300",
+		"-p", cfg.piPort, sshHost,
+		"sudo systemctl is-active droneOS.service")
+	checkCmd.Dir = projectDir
+	output, err := checkCmd.Output()
+	if err != nil || string(output) != "active\n" {
+		fmt.Println("\n⚠ Warning: droneOS service may not have started correctly")
+		fmt.Printf("Check status with: ssh -p %s %s 'sudo systemctl status droneOS.service'\n", cfg.piPort, sshHost)
+	} else {
+		fmt.Println("\n✓ Binary deployed and droneOS service is running")
+	}
+
 	fmt.Printf("To view logs: ssh -p %s %s 'sudo journalctl -u droneOS.service -f'\n", cfg.piPort, sshHost)
 	return nil
 }

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/signal"
@@ -55,6 +56,8 @@ var MotorFuncMap = map[string]any{
 	"MG90S":          MG90S.Main,
 }
 
+// Disabled for minimal testing
+/*
 type wifiDebugWriter struct {
 	ctx       context.Context
 	status    *atomic.Bool
@@ -130,6 +133,24 @@ func (w *wifiDebugWriter) loop() {
 			})
 		}
 	}
+}
+*/
+
+type gpioPinLog struct {
+	Name           string `json:"name,omitempty"`
+	Scheme         string `json:"scheme,omitempty"`
+	Number         int    `json:"number,omitempty"`
+	ConfigChip     string `json:"configChip,omitempty"`
+	ConfigOffset   int    `json:"configOffset,omitempty"`
+	ResolvedChip   string `json:"resolvedChip,omitempty"`
+	ResolvedOffset int    `json:"resolvedOffset,omitempty"`
+	Direction      string `json:"direction,omitempty"`
+	ActiveLow      *bool  `json:"activeLow,omitempty"`
+	Bias           string `json:"bias,omitempty"`
+	Drive          string `json:"drive,omitempty"`
+	Used           bool   `json:"used,omitempty"`
+	Consumer       string `json:"consumer,omitempty"`
+	Error          string `json:"error,omitempty"`
 }
 
 func logGPIOPins(kind, name string, pins []config.Pin, statuses []gpio.PinStatus) {
@@ -332,9 +353,6 @@ func initRadioLink(ctx context.Context, name string, cfg *config.Radio) (protoco
 }
 
 func main() {
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	setLogLevelFromEnv()
-
 	configFile := flag.String(
 		"config-file",
 		"configs/config.yaml",
@@ -343,6 +361,17 @@ func main() {
 	flag.Parse()
 	settings := config.GetConfig(*configFile)
 
+	// Configure logging based on config setting
+	if settings.Drone.EnableLogging {
+		zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+		setLogLevel(settings.Drone.LogLevel)
+		log.Logger = log.Output(os.Stdout)
+	} else {
+		// Disable ALL logging - operate entirely in memory
+		zerolog.SetGlobalLevel(zerolog.Disabled)
+		log.Logger = zerolog.New(io.Discard).With().Timestamp().Logger()
+	}
+
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
 		syscall.SIGINT,  // ctrl+C
@@ -350,10 +379,14 @@ func main() {
 	)
 	defer stop() // restores default signal behavior
 
+	// Ensure clean shutdown with filesystem sync
+	defer func() {
+		log.Info().Msg("initiating graceful shutdown")
+		syscall.Sync() // Force filesystem sync before exit
+		time.Sleep(100 * time.Millisecond)
+	}()
+
 	wifiConnected := &atomic.Bool{}
-	wifiAddr := fmt.Sprintf("%s:%d", settings.Base.Host, settings.Base.Port)
-	debugWriter := newWiFiDebugWriter(ctx, wifiConnected, wifiAddr, settings.Drone.ID)
-	log.Logger = log.Output(zerolog.MultiLevelWriter(os.Stdout, debugWriter))
 
 	log.Info().Interface("settings", settings)
 
@@ -386,6 +419,7 @@ func main() {
 	radioLink, err := initRadioLink(ctx, settings.Drone.Radio.Name, &settings.Drone.Radio)
 	if err != nil {
 		log.Error().Err(err).Msg("error initializing radio")
+		radioLink = nil
 	}
 	var radioTransport *protocol.RadioTransport
 	if radioLink != nil {
@@ -429,6 +463,8 @@ func main() {
 		sensorEventChannels[i] = make(chan sensor.Event)
 	}
 	for index, device := range settings.Drone.Sensors {
+		index := index   // capture loop variable
+		device := device // capture loop variable
 		go func() {
 			_, err := utils.CallFunctionByName(
 				ctx,
@@ -438,8 +474,7 @@ func main() {
 				&sensorEventChannels,
 			)
 			if err != nil {
-				log.Error().Err(err).
-					Msg("error initializing sensors")
+				log.Error().Err(err).Msg("error initializing sensors")
 				return
 			}
 		}()
@@ -449,7 +484,18 @@ func main() {
 	taskQueue := make(chan drone.Task)
 	priorityMutex := control.NewPriorityMutex()
 	for index, name := range settings.Drone.ControlAlgorithmPriority {
+		index := index // capture loop variable
+		name := name   // capture loop variable
 		go func() {
+			// Each control algorithm gets its corresponding sensor channel
+			// Make sure we have enough sensor channels
+			if index >= len(sensorEventChannels) {
+				log.Error().
+					Int("index", index).
+					Int("available", len(sensorEventChannels)).
+					Msg("not enough sensor channels for control algorithm")
+				return
+			}
 			_, err := utils.CallFunctionByName(
 				ctx,
 				ControlFuncMap,
@@ -461,8 +507,7 @@ func main() {
 				&taskQueue,
 			)
 			if err != nil {
-				log.Error().Err(err).
-					Msg("error initializing control algorithms")
+				log.Error().Err(err).Msg("error initializing control algorithms")
 				return
 			}
 		}()
@@ -486,17 +531,15 @@ func main() {
 					&taskQueue,
 				)
 				if err != nil {
-					log.Error().Err(err).Str("task", t.Name).
-						Msg("error calling task")
+					log.Error().Err(err).Str("task", t.Name).Msg("error calling task")
 				}
 			}(task)
-			// Don't call runtime.GC() on every task - let Go manage memory
 		}
 	}
 }
 
-func setLogLevelFromEnv() {
-	level := strings.TrimSpace(os.Getenv("DRONEOS_LOG_LEVEL"))
+func setLogLevel(level string) {
+	level = strings.TrimSpace(level)
 	if level == "" {
 		level = "warn"
 	}

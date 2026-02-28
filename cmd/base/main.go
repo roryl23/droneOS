@@ -78,8 +78,19 @@ func initRadioLink(ctx context.Context, name string, cfg *config.Radio) (protoco
 }
 
 func main() {
+	configFile := flag.String(
+		"config-file",
+		"configs/config.yaml",
+		"config file location",
+	)
+	flag.Parse()
+	settings := config.GetConfig(*configFile)
+
+	// Configure logging based on config setting
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	logger := zerolog.New(os.Stdout)
+	setLogLevel(settings.Base.LogLevel)
+	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
+	log.Logger = logger
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
 		syscall.SIGINT,  // ctrl+C
@@ -88,13 +99,6 @@ func main() {
 	defer stop() // restores default signal behavior
 	ctx = logger.WithContext(ctx)
 
-	configFile := flag.String(
-		"config-file",
-		"configs/config.yaml",
-		"config file location",
-	)
-	flag.Parse()
-	settings := config.GetConfig(*configFile)
 	log.Info().Interface("settings", settings)
 
 	// initialize the configured controller interface and handler
@@ -159,4 +163,29 @@ func main() {
 	}
 
 	radio(ctx, &settings)
+}
+
+func setLogLevel(level string) {
+	level = strings.TrimSpace(level)
+	if level == "" {
+		level = "warn"
+	}
+	switch strings.ToLower(level) {
+	case "panic":
+		zerolog.SetGlobalLevel(zerolog.PanicLevel)
+	case "fatal":
+		zerolog.SetGlobalLevel(zerolog.FatalLevel)
+	case "error":
+		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
+	case "warn", "warning":
+		zerolog.SetGlobalLevel(zerolog.WarnLevel)
+	case "info":
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	case "debug":
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	case "trace":
+		zerolog.SetGlobalLevel(zerolog.TraceLevel)
+	default:
+		zerolog.SetGlobalLevel(zerolog.WarnLevel)
+	}
 }

@@ -13,6 +13,7 @@ type BaseConfig struct {
 	Port       int    `yaml:"port"`
 	Controller string `yaml:"controller"`
 	Radio      Radio  `yaml:"radio"`
+	LogLevel   string `yaml:"logLevel"`
 }
 
 type Pin struct {
@@ -49,6 +50,8 @@ type DroneConfig struct {
 	Outputs                  []Device `yaml:"outputs"`
 	ControlAlgorithmPriority []string `yaml:"controlAlgorithmPriority"`
 	GPIOLayout               string   `yaml:"gpioLayout"`
+	EnableLogging            bool     `yaml:"enableLogging"`
+	LogLevel                 string   `yaml:"logLevel"`
 }
 
 type Config struct {

@@ -23,11 +23,11 @@ import (
 
 const (
 	// GPIO pins for Waveshare LoRa HAT on Raspberry Pi
-	M0_PIN = 17 // GPIO 17 (Physical Pin 11) - Mode 0
-	M1_PIN = 27 // GPIO 27 (Physical Pin 13) - Mode 1
+	M0_PIN = 22 // GPIO 22 (BCM22, Physical Pin 15) - Mode 0
+	M1_PIN = 27 // GPIO 27 (BCM27, Physical Pin 13) - Mode 1
 
 	// Serial configuration
-	SERIAL_DEVICE = "/dev/ttyS0" // Pi's hardware UART
+	SERIAL_DEVICE = "/dev/ttyS0" // Pi's hardware UART (GPIO 14 TX, GPIO 15 RX)
 	BAUD_RATE     = 9600
 )
 
@@ -64,10 +64,10 @@ func NewLoRaHAT(ctx context.Context, serialDevice string, useGPIO bool) (*LoRaHA
 
 	// Open serial port
 	// Use longer timeout for USB devices to reduce kernel pressure
-	readTimeout := 100 * time.Millisecond
+	readTimeout := 200 * time.Millisecond
 	if !useGPIO {
-		// USB serial devices need longer timeouts
-		readTimeout = 500 * time.Millisecond
+		// USB serial devices need much longer timeouts to reduce polling
+		readTimeout = 1000 * time.Millisecond
 	}
 	cfg := &serial.Config{
 		Name:        serialDevice,
@@ -109,6 +109,11 @@ func NewLoRaHAT(ctx context.Context, serialDevice string, useGPIO bool) (*LoRaHA
 
 		// Set to transmission mode (M0=LOW, M1=LOW)
 		hat.setMode("tx")
+
+		// Give extra time for mode to settle
+		time.Sleep(200 * time.Millisecond)
+
+		logger.Info().Msg("LoRa configured in GPIO mode: M0=LOW, M1=LOW (TX/RX mode)")
 	} else {
 		logger.Info().Msg("LoRa in USB mode - ensure jumpers are set: UART=A, M0=GND, M1=GND for transmission")
 		// In USB mode, assume jumpers are physically set correctly
@@ -158,7 +163,7 @@ func (h *LoRaHAT) configureLoRa() error {
 		0x00,       // Network ID 0
 		0x17,       // Channel 23 (915 MHz)
 		0x04,       // Air data rate 4.8K
-		0x16,       // Power 22 dBm
+		0x0D,       // Power 13 dBm (~30mA TX current, was 0x16 = 22 dBm ~140mA)
 		0x01, 0x04, // Other parameters
 	}
 
@@ -193,7 +198,7 @@ func (h *LoRaHAT) drainSerialBuffer() {
 		}
 		totalDiscarded += n
 		// Longer sleep for USB devices to avoid overwhelming the kernel
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	if totalDiscarded > 0 {
@@ -223,6 +228,8 @@ func (h *LoRaHAT) Receive() ([]byte, error) {
 
 	// Handle timeout or no data (common, don't log)
 	if err != nil || n == 0 {
+		// Add small delay to prevent tight polling loop
+		time.Sleep(10 * time.Millisecond)
 		return []byte{}, nil
 	}
 

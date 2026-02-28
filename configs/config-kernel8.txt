@@ -49,3 +49,8 @@ otg_mode=1
 dtoverlay=dwc2,dr_mode=host
 
 [all]
+
+# Enable hardware UART for LoRa HAT communication
+enable_uart=1
+# Disable Bluetooth to free up hardware UART (/dev/ttyS0 becomes primary UART)
+dtoverlay=disable-bt

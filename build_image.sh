@@ -229,6 +229,38 @@ fi
 # enable ssh
 sudo touch "${SD_CARD_BOOT_DIR}"/ssh
 
+# set up SSH key authentication for passwordless access
+echo "setting up SSH key authentication..."
+HOST_SSH_KEY=""
+# Try to find an existing SSH public key on the host
+if [ -f ~/.ssh/id_ed25519.pub ]; then
+  HOST_SSH_KEY=$(cat ~/.ssh/id_ed25519.pub)
+elif [ -f ~/.ssh/id_rsa.pub ]; then
+  HOST_SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
+elif [ -f ~/.ssh/id_ecdsa.pub ]; then
+  HOST_SSH_KEY=$(cat ~/.ssh/id_ecdsa.pub)
+fi
+
+# If no key exists, generate one
+if [ -z "$HOST_SSH_KEY" ]; then
+  echo "no SSH key found on host, generating new ed25519 key..."
+  ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -C "$(whoami)@$(hostname)"
+  HOST_SSH_KEY=$(cat ~/.ssh/id_ed25519.pub)
+fi
+
+# Add the SSH key to the user's authorized_keys in the image
+if [ -n "$HOST_SSH_KEY" ]; then
+  sudo mkdir -p "${SD_CARD_ROOT_DIR}/home/${USER_NAME}/.ssh"
+  echo "$HOST_SSH_KEY" | sudo tee "${SD_CARD_ROOT_DIR}/home/${USER_NAME}/.ssh/authorized_keys" >/dev/null
+  sudo chmod 700 "${SD_CARD_ROOT_DIR}/home/${USER_NAME}/.ssh"
+  sudo chmod 600 "${SD_CARD_ROOT_DIR}/home/${USER_NAME}/.ssh/authorized_keys"
+  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c \
+    "chown -R ${USER_NAME}:${USER_NAME} /home/${USER_NAME}/.ssh"
+  echo "✓ SSH key added to ${USER_NAME}@drone authorized_keys"
+else
+  echo "warning: could not set up SSH key authentication"
+fi
+
 echo "setting wifi country..."
 sudo mkdir -p "${SD_CARD_ROOT_DIR}"/etc/modprobe.d
 echo "REGDOMAIN=${WIFI_COUNTRY}" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/default/crda
@@ -370,13 +402,14 @@ Requires=droneOSNetwork.service
 After=droneOSNetwork.service
 
 [Service]
-Type=notify
+Type=simple
 WorkingDirectory=/opt/droneOS/
 ExecStart=/opt/droneOS/base.bin --config-file config.yaml
 ExecReload=/bin/kill -s HUP $MAINPID
-TimeoutStartSec=0
-RestartSec=1
-Restart=always
+RestartSec=5
+Restart=on-failure
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
@@ -388,15 +421,27 @@ elif [[ $TYPE == "drone" ]]; then
 Description=Start droneOS application
 After=network-online.target NetworkManager.service
 Wants=network-online.target
+# Wait for USB devices to settle before starting
+After=systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+# Limit restart attempts to prevent system stress
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
-Type=notify
+Type=simple
 WorkingDirectory=/opt/droneOS/
 ExecStart=/opt/droneOS/drone.bin --config-file config.yaml
 ExecReload=/bin/kill -s HUP $MAINPID
-TimeoutStartSec=0
-RestartSec=1
-Restart=always
+# Longer restart delay to prevent rapid restart loops
+RestartSec=10
+Restart=on-failure
+StandardOutput=null
+StandardError=null
+# Nice level to reduce priority (less CPU stress)
+Nice=5
+# I/O scheduling to reduce disk pressure
+IOSchedulingClass=idle
 
 [Install]
 WantedBy=multi-user.target
@@ -544,19 +589,36 @@ else
 fi
 
 if [ -f "${BOOT_CONFIG_DIR}/cmdline.txt" ]; then
-  # Add filesystem mount options for better stability
-  if ! grep -q "rootflags=commit=60" "${BOOT_CONFIG_DIR}/cmdline.txt"; then
-    sudo sed -i '1s/$/ rootflags=commit=60/' "${BOOT_CONFIG_DIR}/cmdline.txt"
-    echo "added rootflags=commit=60 to reduce filesystem sync frequency"
+  # Add filesystem mount options for better stability and error handling
+  if ! grep -q "rootflags=" "${BOOT_CONFIG_DIR}/cmdline.txt"; then
+    sudo sed -i '1s/$/ rootflags=commit=120,errors=remount-ro/' "${BOOT_CONFIG_DIR}/cmdline.txt"
+    echo "added rootflags=commit=120,errors=remount-ro for filesystem stability"
+  fi
+  # Add fsck options to check/repair filesystem on boot
+  if ! grep -q "fsck.mode=" "${BOOT_CONFIG_DIR}/cmdline.txt"; then
+    sudo sed -i '1s/$/ fsck.mode=force fsck.repair=yes/' "${BOOT_CONFIG_DIR}/cmdline.txt"
+    echo "enabled automatic filesystem check and repair on boot"
   fi
 fi
 
-# Configure fstab to reduce writes
-echo "configuring fstab for reduced writes..."
+# Configure fstab to reduce writes and improve error handling
+echo "configuring fstab for reduced writes and better error handling..."
 if [ -f "${SD_CARD_ROOT_DIR}/etc/fstab" ]; then
-  # Add noatime to root mount to reduce metadata writes
-  sudo sed -i 's|\(^[^#].*\s/\s.*\)defaults|\1defaults,noatime,commit=60|' "${SD_CARD_ROOT_DIR}/etc/fstab"
-  echo "added noatime and commit=60 to root filesystem mount options"
+  # Add noatime, commit, and errors=remount-ro for better stability
+  sudo sed -i 's|\(^[^#].*\s/\s.*\)defaults|\1defaults,noatime,commit=120,errors=remount-ro|' "${SD_CARD_ROOT_DIR}/etc/fstab"
+  echo "added noatime, commit=120, and errors=remount-ro to root filesystem mount options"
 fi
+
+# Add USB power management to prevent brownouts
+echo "configuring USB power management..."
+sudo tee -a "${BOOT_CONFIG_DIR}/config.txt" >/dev/null <<'EOF'
+
+# USB and power configuration for LoRa radio stability
+max_usb_current=1
+usb_max_current_enable=1
+# Disable USB power management to prevent device resets
+dtoverlay=dwc2,dr_mode=host
+EOF
+echo "USB power settings configured for LoRa radio"
 
 # cleanup handled by trap on successful exit

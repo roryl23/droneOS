@@ -28,6 +28,14 @@ PI_BIN="${DRONEOS_PI_BIN:-drone.bin}"
 OUTPUT="${DRONEOS_PI_OUT:-${PROJECT_DIR}/build/droneOS/drone.bin}"
 GO_CMD="${DRONEOS_GO_CMD:-go}"
 
+# Check SSH connectivity - only warn if not working, don't fail
+SSH_TARGET="${PI_USER}@${PI_HOST}"
+if ! ssh -p "${PI_PORT}" -o BatchMode=yes -o ConnectTimeout=5 "${SSH_TARGET}" true 2>/dev/null; then
+  echo "⚠ Warning: SSH key authentication may not be set up for ${SSH_TARGET}"
+  echo "If connection fails, run: ssh-copy-id -p ${PI_PORT} ${SSH_TARGET}"
+  echo "Continuing anyway..."
+fi
+
 ARGS=(
   --config-file "$CONFIG_FILE"
   --arch "$ARCH"
