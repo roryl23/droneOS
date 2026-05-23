@@ -1,59 +1,12 @@
 #!/usr/bin/env bash
-# usage examples:
-#   bash pi_runner.sh
-#   DRONEOS_PI_HOST=192.168.0.108 bash pi_runner.sh ./configs/config.yaml
-
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cat >&2 <<'EOF'
+pi_runner.sh is not yet ported to Alpine/OpenRC.
 
-CONFIG_FILE="${PROJECT_DIR}/configs/config.yaml"
-EXTRA_ARGS=()
-if [[ $# -gt 0 ]]; then
-  if [[ "${1:-}" != -* ]]; then
-    CONFIG_FILE="$1"
-    shift
-  fi
-  EXTRA_ARGS=("$@")
-fi
+Development images configure WiFi and SSH access. Build a dev SD card, then sync source with sync_pi.sh:
 
-ARCH="${DRONEOS_PI_ARCH:-arm64}"
-GOARM="${DRONEOS_PI_GOARM:-""}"
-CC="${DRONEOS_PI_CC:-""}"
-PI_HOST="${DRONEOS_PI_HOST:-raspberrypi.local}"
-PI_USER="${DRONEOS_PI_USER:-root}"
-PI_PORT="${DRONEOS_PI_PORT:-22}"
-PI_DIR="${DRONEOS_PI_DIR:-/opt/droneOS}"
-PI_BIN="${DRONEOS_PI_BIN:-drone.bin}"
-OUTPUT="${DRONEOS_PI_OUT:-${PROJECT_DIR}/build/droneOS/drone.bin}"
-GO_CMD="${DRONEOS_GO_CMD:-go}"
-
-# Check SSH connectivity - only warn if not working, don't fail
-SSH_TARGET="${PI_USER}@${PI_HOST}"
-if ! ssh -p "${PI_PORT}" -o BatchMode=yes -o ConnectTimeout=5 "${SSH_TARGET}" true 2>/dev/null; then
-  echo "⚠ Warning: SSH key authentication may not be set up for ${SSH_TARGET}"
-  echo "If connection fails, run: ssh-copy-id -p ${PI_PORT} ${SSH_TARGET}"
-  echo "Continuing anyway..."
-fi
-
-ARGS=(
-  --config-file "$CONFIG_FILE"
-  --arch "$ARCH"
-  --pi-host "$PI_HOST"
-  --pi-user "$PI_USER"
-  --pi-port "$PI_PORT"
-  --pi-dir "$PI_DIR"
-  --pi-bin-name "$PI_BIN"
-  --output "$OUTPUT"
-  --go-cmd "$GO_CMD"
-)
-
-if [[ -n "$GOARM" ]]; then
-  ARGS+=(--goarm "$GOARM")
-fi
-if [[ -n "$CC" ]]; then
-  ARGS+=(--cc "$CC")
-fi
-
-cd "$PROJECT_DIR"
-exec "$GO_CMD" run ./cmd/dev/pi_runner/main.go "${ARGS[@]}" "${EXTRA_ARGS[@]}"
+  BUILD_MODE=dev bash build_image.sh sdb kernel8 drone droneos admin password MySSID MyPass US
+  bash sync_pi.sh 192.168.1.42
+EOF
+exit 1

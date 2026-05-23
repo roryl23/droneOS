@@ -1,624 +1,766 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# usage:
-# bash build_image.sh sd# kernel8 drone username userpassword ssid ssidpassword wifi_country
-#
-# Environment variables:
-# BUILD_MODE=prod          Build mode: dev (default) or prod
-#                          - dev: droneOS service disabled, no overlayfs, for development
-#                          - prod: droneOS service enabled, overlayfs enabled, for production
-# INSTALL_PISUGAR=1        Install PiSugar3 power manager (default: 0)
+usage() {
+  cat >&2 <<'EOF'
+usage:
+  bash build_image.sh sd# kernel8 drone [hostname] [username] [userpassword] [ssid] [ssidpassword] [wifi_country]
+  bash build_image.sh sd# kernel8 drone username userpassword ssid ssidpassword wifi_country
 
-# input parameters
-# lsblk will let you find the value for this parameter:
-SD_CARD=${1:-""}
-# [kernel, kernel7l, kernel8]
-KERNEL=${2:-"kernel"}
-# [base, drone]
-TYPE=${3:-"drone"}
-# login user
-USER_NAME=${4:-"admin"}
-USER_PASSWORD=${5:-"adminpassword"}
-# wifi credentials
-SSID=${6:-"droneos"}
-SSID_PASSWORD=${7:-"X0YhW2Wy2bmtKXkT2ST61v2SdBk4FGgE"}
-WIFI_COUNTRY=${8:-"US"}
+examples:
+  bash build_image.sh sdb kernel8 drone droneos
+  BUILD_MODE=dev bash build_image.sh /dev/sdb kernel8 drone droneos admin password MySSID MyPass US
+  BUILD_MODE=dev bash build_image.sh /dev/sdb kernel8 drone admin password MySSID MyPass US
 
-# local variables
-THREADS=16
-PROJECT_DIR=$PWD
-BUILD_DIR=$PROJECT_DIR/build
-RPI_LINUX_BRANCH=rpi-6.6.y
-RPI_OS_DATE=${RPI_OS_DATE:-2024-07-04}
-RPI_OS_SERIES=${RPI_OS_SERIES:-bookworm}
-RPI_OS_FLAVOR_BASE=${RPI_OS_FLAVOR_BASE:-raspios}
-RPI_OS_FLAVOR_DRONE=${RPI_OS_FLAVOR_DRONE:-raspios}
-RPI_OS_CACHE_DIR=${RPI_OS_CACHE_DIR:-${BUILD_DIR}}
-RT_PATCH_VERSION=6.6.78-rt51
-RT_PATCH_BASE="${RT_PATCH_VERSION%-rt*}"
-RT_PATCH_TARBALL="patches-${RT_PATCH_VERSION}.tar.gz"
-RT_PATCH_URL="https://cdn.kernel.org/pub/linux/kernel/projects/rt/6.6/older/${RT_PATCH_TARBALL}"
-RT_PATCH_DIR="${BUILD_DIR}/patches"
-RT_PATCH_EXTRACT_MARKER="${RT_PATCH_DIR}/.rt_patch_version"
-RT_PATCH_MARKER="${BUILD_DIR}/linux/.rt_patched_${RT_PATCH_VERSION}"
-APPLY_RT_PATCH=${APPLY_RT_PATCH:-0}
-SKIP_KERNEL_BUILD=${SKIP_KERNEL_BUILD:-1}
-INSTALL_PISUGAR=${INSTALL_PISUGAR:-0}
-BUILD_MODE=${BUILD_MODE:-dev}
+environment:
+  BUILD_MODE=prod|dev        prod enables droneOS on boot (default: prod)
+                             dev leaves droneOS disabled and enables WiFi/SSH
+  ALPINE_BRANCH=latest-stable
+  ALPINE_VERSION=3.20.3      optional exact Alpine version
+  ALPINE_TARBALL=/path/file  optional local alpine-rpi tarball
+  ALPINE_TARBALL_URL=https://...
+  ALPINE_ARCH=aarch64        optional override: aarch64, armv7, or armhf
+  IMAGE_HOSTNAME=droneos     hostname when using the old 8-argument form
+  DEV_USER_NAME=admin        dev SSH user
+  DEV_USER_PASSWORD=...      dev SSH user password
+  WIFI_SSID=droneos          dev WiFi SSID
+  WIFI_PASSWORD=...          dev WiFi password
+  WIFI_COUNTRY=US            regulatory country code
+  DISABLE_WIFI=1             add Raspberry Pi disable-wifi overlay (default: prod=1, dev=0)
+  DISABLE_BLUETOOTH=1        add Raspberry Pi disable-bt overlay (default: 1)
+EOF
+}
 
-# Set mode-specific defaults
-if [[ "${BUILD_MODE}" == "prod" ]]; then
-  ENABLE_OVERLAYFS=1
-  ENABLE_DRONEOS_SERVICE=1
-  echo "Production mode: OverlayFS enabled, droneOS service enabled"
-else
-  ENABLE_OVERLAYFS=0
-  ENABLE_DRONEOS_SERVICE=0
-  echo "Development mode: OverlayFS disabled, droneOS service disabled"
-fi
-SD_CARD_BOOT_DEVICE="${SD_CARD}1"
-SD_CARD_ROOT_DEVICE="${SD_CARD}2"
-MOUNT_BASE=${MOUNT_BASE:-/tmp/droneos_mnt}
-SD_CARD_BOOT_DIR="${MOUNT_BASE}/rpi_boot"
-SD_CARD_ROOT_DIR="${MOUNT_BASE}/rpi_root"
-INSTALL_DIR=${SD_CARD_ROOT_DIR}/opt/droneOS
-if [[ $KERNEL == "kernel8" ]]; then
-  ARM=aarch64
-else
-  ARM=arm
-fi
+require_command() {
+  local name=$1
+  if ! command -v "$name" >/dev/null 2>&1; then
+    echo "required command not found: ${name}" >&2
+    exit 1
+  fi
+}
+
+partition_path() {
+  local device=$1
+  local number=$2
+  if [[ "$device" =~ [0-9]$ ]]; then
+    printf '%sp%s\n' "$device" "$number"
+  else
+    printf '%s%s\n' "$device" "$number"
+  fi
+}
+
+normalize_device() {
+  local value=$1
+  if [[ "$value" == /dev/* ]]; then
+    printf '%s\n' "$value"
+  else
+    printf '/dev/%s\n' "$value"
+  fi
+}
+
+append_once() {
+  local file=$1
+  local line=$2
+  if [[ ! -f "$file" ]] || ! grep -Fxq "$line" "$file"; then
+    printf '%s\n' "$line" | "${SUDO[@]}" tee -a "$file" >/dev/null
+  fi
+}
+
+append_cmdline_arg() {
+  local file=$1
+  local arg=$2
+  local key=${arg%%=*}
+
+  [[ -f "$file" ]] || return 0
+  if ! grep -Eq "(^|[[:space:]])${key}=" "$file"; then
+    "${SUDO[@]}" sed -i "1s|$| ${arg}|" "$file"
+  fi
+}
+
+quote_sh() {
+  local value=${1//\'/\'\\\'\'}
+  printf "'%s'" "$value"
+}
+
+write_shell_var() {
+  local file=$1
+  local name=$2
+  local value=$3
+  printf '%s=%s\n' "$name" "$(quote_sh "$value")" >> "$file"
+}
+
+wpa_quote() {
+  local value=$1
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  printf '%s' "$value"
+}
+
+find_host_ssh_key() {
+  local key_path
+
+  HOST_SSH_KEY=""
+  for key_path in \
+    "${HOME}/.ssh/id_ed25519.pub" \
+    "${HOME}/.ssh/id_rsa.pub" \
+    "${HOME}/.ssh/id_ecdsa.pub"; do
+    if [[ -f "$key_path" ]]; then
+      HOST_SSH_KEY=$(<"$key_path")
+      return
+    fi
+  done
+
+  echo "no SSH key found on host, generating ${HOME}/.ssh/id_ed25519..."
+  mkdir -p "${HOME}/.ssh"
+  ssh-keygen -t ed25519 -f "${HOME}/.ssh/id_ed25519" -N "" -C "$(whoami)@$(hostname)"
+  HOST_SSH_KEY=$(<"${HOME}/.ssh/id_ed25519.pub")
+}
+
+resolve_alpine_tarball() {
+  local release_dir image_file listing
+
+  if [[ -n "${ALPINE_TARBALL:-}" ]]; then
+    if [[ ! -f "$ALPINE_TARBALL" ]]; then
+      echo "ALPINE_TARBALL does not exist: ${ALPINE_TARBALL}" >&2
+      exit 1
+    fi
+    ALPINE_IMAGE_FILE=$(basename "$ALPINE_TARBALL")
+    ALPINE_IMAGE_PATH=$ALPINE_TARBALL
+    return
+  fi
+
+  if [[ -n "${ALPINE_TARBALL_URL:-}" ]]; then
+    ALPINE_IMAGE_URL=$ALPINE_TARBALL_URL
+    ALPINE_IMAGE_FILE=$(basename "$ALPINE_IMAGE_URL")
+  elif [[ -n "${ALPINE_VERSION:-}" ]]; then
+    ALPINE_IMAGE_FILE="alpine-rpi-${ALPINE_VERSION}-${ALPINE_ARCH}.tar.gz"
+    ALPINE_IMAGE_URL="${ALPINE_MIRROR}/${ALPINE_BRANCH}/releases/${ALPINE_ARCH}/${ALPINE_IMAGE_FILE}"
+  else
+    release_dir="${ALPINE_MIRROR}/${ALPINE_BRANCH}/releases/${ALPINE_ARCH}"
+    echo "resolving latest Alpine Raspberry Pi image from ${release_dir}..."
+    listing=$(wget -qO- "${release_dir}/")
+    image_file=$(printf '%s\n' "$listing" \
+      | sed -nE "s/.*href=\"(alpine-rpi-[^\"]+-${ALPINE_ARCH}\.tar\.gz)\".*/\1/p" \
+      | sort -V \
+      | tail -n 1)
+    if [[ -z "$image_file" ]]; then
+      echo "could not find alpine-rpi tarball for ${ALPINE_ARCH}; set ALPINE_VERSION or ALPINE_TARBALL_URL" >&2
+      exit 1
+    fi
+    ALPINE_IMAGE_FILE=$image_file
+    ALPINE_IMAGE_URL="${release_dir}/${ALPINE_IMAGE_FILE}"
+  fi
+
+  mkdir -p "$ALPINE_CACHE_DIR"
+  ALPINE_IMAGE_PATH="${ALPINE_CACHE_DIR}/${ALPINE_IMAGE_FILE}"
+  if [[ ! -f "$ALPINE_IMAGE_PATH" ]]; then
+    echo "downloading ${ALPINE_IMAGE_URL}..."
+    wget -O "$ALPINE_IMAGE_PATH" "$ALPINE_IMAGE_URL"
+  fi
+}
+
+fetch_dev_apks() {
+  local main_repo="${ALPINE_MIRROR}/${ALPINE_BRANCH}/main"
+  local community_repo="${ALPINE_MIRROR}/${ALPINE_BRANCH}/community"
+  local packages=(openssh rsync go iw wireless-regdb)
+
+  if [[ "$TYPE" == "base" ]]; then
+    packages+=(hostapd dnsmasq)
+  else
+    packages+=(wpa_supplicant)
+  fi
+
+  mkdir -p "$DEV_APK_CACHE_DIR"
+  echo "fetching Alpine dev packages for ${ALPINE_ARCH}: ${packages[*]}..."
+  apk fetch \
+    --recursive \
+    --arch "$ALPINE_ARCH" \
+    --repository "$main_repo" \
+    --repository "$community_repo" \
+    --output "$DEV_APK_CACHE_DIR" \
+    "${packages[@]}"
+}
+
+unmount_existing_partitions() {
+  local source mountpoint
+  while read -r source mountpoint; do
+    if [[ -n "${mountpoint:-}" ]]; then
+      echo "unmounting ${source} from ${mountpoint}..."
+      "${SUDO[@]}" umount "$source"
+    fi
+  done < <(lsblk -nrpo NAME,MOUNTPOINT "$DEVICE")
+}
+
+create_dev_access_overlay() {
+  local staging=$1
+  local dev_env="$staging/etc/droneos/dev.env"
+  local dev_password_hash
+  local escaped_ssid escaped_password
+
+  dev_password_hash=$(printf '%s\n' "$DEV_USER_PASSWORD" | openssl passwd -6 -stdin)
+  escaped_ssid=$(wpa_quote "$WIFI_SSID")
+  escaped_password=$(wpa_quote "$WIFI_PASSWORD")
+
+  : > "$dev_env"
+  write_shell_var "$dev_env" DRONEOS_ALPINE_ARCH "$ALPINE_ARCH"
+  write_shell_var "$dev_env" DEV_USER_NAME "$DEV_USER_NAME"
+  write_shell_var "$dev_env" DEV_USER_PASSWORD_HASH "$dev_password_hash"
+  write_shell_var "$dev_env" WIFI_COUNTRY "$WIFI_COUNTRY"
+  write_shell_var "$dev_env" DEV_WIFI_MODE "$([[ "$TYPE" == "base" ]] && printf ap || printf client)"
+  write_shell_var "$dev_env" DEV_STATIC_IP "10.42.0.1"
+  write_shell_var "$dev_env" DEV_PROJECT_DIR "$DEV_PROJECT_DIR"
+  chmod 0600 "$dev_env"
+
+  printf '%s\n' "$HOST_SSH_KEY" > "$staging/etc/droneos/authorized_keys"
+  chmod 0600 "$staging/etc/droneos/authorized_keys"
+
+  cat > "$staging/etc/modprobe.d/cfg80211.conf" <<EOF
+options cfg80211 ieee80211_regdom=${WIFI_COUNTRY}
+EOF
+
+  cat > "$staging/etc/ssh/sshd_config" <<'EOF'
+Port 22
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+PasswordAuthentication yes
+PubkeyAuthentication yes
+PermitRootLogin no
+ChallengeResponseAuthentication no
+UsePAM no
+Subsystem sftp /usr/lib/ssh/sftp-server
+EOF
+  cp "$staging/etc/ssh/sshd_config" "$staging/etc/droneos/sshd_config"
+
+  if [[ "$TYPE" == "base" ]]; then
+    cat > "$staging/etc/network/interfaces" <<'EOF'
+auto lo
+iface lo inet loopback
+
+auto wlan0
+iface wlan0 inet static
+    address 10.42.0.1
+    netmask 255.255.255.0
+EOF
+    cp "$staging/etc/network/interfaces" "$staging/etc/droneos/interfaces"
+
+    cat > "$staging/etc/hostapd/hostapd.conf" <<EOF
+interface=wlan0
+driver=nl80211
+ssid=${escaped_ssid}
+hw_mode=g
+channel=6
+wmm_enabled=1
+auth_algs=1
+wpa=2
+wpa_passphrase=${escaped_password}
+wpa_key_mgmt=WPA-PSK
+rsn_pairwise=CCMP
+country_code=${WIFI_COUNTRY}
+EOF
+    cp "$staging/etc/hostapd/hostapd.conf" "$staging/etc/droneos/hostapd.conf"
+
+    cat > "$staging/etc/conf.d/hostapd" <<'EOF'
+hostapd_args="/etc/hostapd/hostapd.conf"
+EOF
+    cp "$staging/etc/conf.d/hostapd" "$staging/etc/droneos/hostapd.conf.d"
+
+    cat > "$staging/etc/dnsmasq.conf" <<'EOF'
+interface=wlan0
+bind-interfaces
+dhcp-range=10.42.0.50,10.42.0.150,12h
+domain-needed
+bogus-priv
+EOF
+    cp "$staging/etc/dnsmasq.conf" "$staging/etc/droneos/dnsmasq.conf"
+  else
+    cat > "$staging/etc/network/interfaces" <<'EOF'
+auto lo
+iface lo inet loopback
+
+auto wlan0
+iface wlan0 inet dhcp
+    pre-up ip link set wlan0 up || true
+    pre-up wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf
+    post-down killall wpa_supplicant || true
+EOF
+    cp "$staging/etc/network/interfaces" "$staging/etc/droneos/interfaces"
+
+    cat > "$staging/etc/wpa_supplicant/wpa_supplicant.conf" <<EOF
+ctrl_interface=/run/wpa_supplicant
+update_config=0
+country=${WIFI_COUNTRY}
+
+network={
+    ssid="${escaped_ssid}"
+    psk="${escaped_password}"
+}
+EOF
+    chmod 0600 "$staging/etc/wpa_supplicant/wpa_supplicant.conf"
+    cp "$staging/etc/wpa_supplicant/wpa_supplicant.conf" "$staging/etc/droneos/wpa_supplicant.conf"
+    chmod 0600 "$staging/etc/droneos/wpa_supplicant.conf"
+  fi
+
+  cat > "$staging/etc/init.d/droneos-dev-setup" <<'EOF'
+#!/sbin/openrc-run
+
+name="droneOS development access"
+description="Install local dev packages and start WiFi/SSH"
+
+depend() {
+    need localmount
+    after modules
+}
+
+install_dev_packages() {
+    local dir
+    for dir in \
+        /media/*/droneos-apks/"${DRONEOS_ALPINE_ARCH}" \
+        /mnt/*/droneos-apks/"${DRONEOS_ALPINE_ARCH}" \
+        /droneos-apks/"${DRONEOS_ALPINE_ARCH}"; do
+        [ -d "$dir" ] || continue
+        set -- "$dir"/*.apk
+        [ -e "$1" ] || continue
+        apk add --no-network --allow-untrusted "$@" || apk add --allow-untrusted "$@"
+        return $?
+    done
+    eerror "could not find droneOS dev APK cache"
+    return 1
+}
+
+ensure_group() {
+    local group=$1
+    grep -q "^${group}:" /etc/group || addgroup -S "$group" >/dev/null 2>&1 || true
+}
+
+restore_dev_configs() {
+    mkdir -p /etc/conf.d /etc/hostapd /etc/network /etc/ssh /etc/wpa_supplicant
+    cp /etc/droneos/interfaces /etc/network/interfaces
+    cp /etc/droneos/sshd_config /etc/ssh/sshd_config
+
+    if [ "$DEV_WIFI_MODE" = "ap" ]; then
+        cp /etc/droneos/hostapd.conf /etc/hostapd/hostapd.conf
+        cp /etc/droneos/hostapd.conf.d /etc/conf.d/hostapd
+        cp /etc/droneos/dnsmasq.conf /etc/dnsmasq.conf
+    else
+        cp /etc/droneos/wpa_supplicant.conf /etc/wpa_supplicant/wpa_supplicant.conf
+        chmod 600 /etc/wpa_supplicant/wpa_supplicant.conf
+    fi
+}
+
+configure_dev_user() {
+    local group
+    if ! id "$DEV_USER_NAME" >/dev/null 2>&1; then
+        adduser -D -h "/home/${DEV_USER_NAME}" -s /bin/ash "$DEV_USER_NAME"
+    fi
+
+    if [ -n "$DEV_USER_PASSWORD_HASH" ]; then
+        printf '%s:%s\n' "$DEV_USER_NAME" "$DEV_USER_PASSWORD_HASH" | chpasswd -e
+    fi
+
+    for group in wheel dialout plugdev gpio i2c spi video input netdev; do
+        ensure_group "$group"
+        addgroup "$DEV_USER_NAME" "$group" >/dev/null 2>&1 || true
+    done
+
+    mkdir -p "/home/${DEV_USER_NAME}/.ssh"
+    if [ -s /etc/droneos/authorized_keys ]; then
+        cp /etc/droneos/authorized_keys "/home/${DEV_USER_NAME}/.ssh/authorized_keys"
+    fi
+    chmod 700 "/home/${DEV_USER_NAME}/.ssh"
+    chmod 600 "/home/${DEV_USER_NAME}/.ssh/authorized_keys" 2>/dev/null || true
+    chown -R "${DEV_USER_NAME}:${DEV_USER_NAME}" "/home/${DEV_USER_NAME}/.ssh"
+    mkdir -p "$DEV_PROJECT_DIR"
+    chown -R "${DEV_USER_NAME}:${DEV_USER_NAME}" "$DEV_PROJECT_DIR"
+}
+
+start_dev_network() {
+    iw reg set "$WIFI_COUNTRY" >/dev/null 2>&1 || true
+    rc-service networking restart || true
+
+    if [ "$DEV_WIFI_MODE" = "ap" ]; then
+        rc-service dnsmasq restart || true
+        rc-service hostapd restart || true
+    fi
+}
+
+start_dev_ssh() {
+    ssh-keygen -A >/dev/null 2>&1 || true
+    rc-service sshd restart || /usr/sbin/sshd || true
+}
+
+print_dev_ip() {
+    local ip
+    if [ "$DEV_WIFI_MODE" = "ap" ]; then
+        ip=$DEV_STATIC_IP
+    else
+        ip=$(ip -4 addr show wlan0 2>/dev/null | awk '/inet / { sub(/\/.*/, "", $2); print $2; exit }')
+    fi
+    echo "droneOS dev SSH: ${DEV_USER_NAME}@${ip:-unknown}" | tee /dev/tty1 >/dev/null 2>&1 || true
+}
+
+start() {
+    . /etc/droneos/dev.env
+    ebegin "Configuring droneOS development access"
+    install_dev_packages || return 1
+    restore_dev_configs || return 1
+    configure_dev_user || return 1
+    start_dev_network
+    start_dev_ssh
+    print_dev_ip
+    eend 0
+}
+EOF
+  chmod 0755 "$staging/etc/init.d/droneos-dev-setup"
+  ln -s /etc/init.d/droneos-dev-setup "$staging/etc/runlevels/default/droneos-dev-setup"
+}
+
+create_openrc_overlay() {
+  local staging=$1
+  local overlay_file=$2
+  local binary_name="${TYPE}.bin"
+
+  rm -rf "$staging"
+  mkdir -p \
+    "$staging/etc/conf.d" \
+    "$staging/etc/droneos" \
+    "$staging/etc/hostapd" \
+    "$staging/etc/init.d" \
+    "$staging/etc/modprobe.d" \
+    "$staging/etc/network" \
+    "$staging/etc/runlevels/default" \
+    "$staging/etc/ssh" \
+    "$staging/etc/wpa_supplicant" \
+    "$staging/opt/droneOS"
+
+  printf '%s\n' "$HOSTNAME" > "$staging/etc/hostname"
+  printf 'i2c-dev\nspidev\n' > "$staging/etc/modules"
+  if [[ "$DISABLE_WIFI" -eq 1 ]]; then
+    printf 'blacklist brcmfmac\nblacklist brcmutil\n' > "$staging/etc/modprobe.d/droneos-no-wifi.conf"
+  fi
+
+  if [[ "$ENABLE_DRONEOS_SERVICE" -eq 1 ]]; then
+    install -m 0755 "$BINARY_PATH" "$staging/opt/droneOS/${binary_name}"
+    install -m 0644 "$PROJECT_DIR/configs/config.yaml" "$staging/opt/droneOS/config.yaml"
+    SERVICE_DIRECTORY="/opt/droneOS"
+    SERVICE_COMMAND="/opt/droneOS/${binary_name}"
+    SERVICE_ARGS="--config-file /opt/droneOS/config.yaml"
+  else
+    SERVICE_DIRECTORY="$DEV_PROJECT_DIR"
+    SERVICE_COMMAND="${DEV_PROJECT_DIR}/build/droneOS/${binary_name}"
+    SERVICE_ARGS="--config-file ${DEV_PROJECT_DIR}/configs/config.yaml"
+  fi
+
+  if [[ "$ENABLE_DEV_ACCESS" -eq 1 ]]; then
+    create_dev_access_overlay "$staging"
+  fi
+
+  cat > "$staging/etc/init.d/droneOS" <<EOF
+#!/sbin/openrc-run
+
+name="droneOS"
+description="droneOS ${TYPE} runtime"
+
+directory="${SERVICE_DIRECTORY}"
+command="${SERVICE_COMMAND}"
+command_args="${SERVICE_ARGS}"
+command_background="yes"
+pidfile="/run/\${RC_SVCNAME}.pid"
+retry="TERM/10/KILL/5"
+output_log="/var/log/droneOS.log"
+error_log="/var/log/droneOS.err"
+
+depend() {
+    need localmount
+    after modules
+}
+
+start_pre() {
+    checkpath -d -m 0755 /run
+    checkpath -d -m 0755 /var/log
+}
+EOF
+  chmod 0755 "$staging/etc/init.d/droneOS"
+
+  if [[ "$ENABLE_DRONEOS_SERVICE" -eq 1 ]]; then
+    ln -s /etc/init.d/droneOS "$staging/etc/runlevels/default/droneOS"
+  fi
+
+  mkdir -p "$(dirname "$overlay_file")"
+  tar --numeric-owner --owner=0 --group=0 -czf "$overlay_file" -C "$staging" .
+}
+
+write_boot_config() {
+  local config_txt="${SD_CARD_BOOT_DIR}/config.txt"
+  local usercfg_txt="${SD_CARD_BOOT_DIR}/usercfg.txt"
+  local cmdline_txt="${SD_CARD_BOOT_DIR}/cmdline.txt"
+  local config_target=$config_txt
+
+  if [[ ! -f "$config_target" ]]; then
+    config_target=$usercfg_txt
+    "${SUDO[@]}" touch "$config_target"
+  fi
+
+  append_once "$config_target" ""
+  append_once "$config_target" "# droneOS hardware configuration"
+  append_once "$config_target" "enable_uart=1"
+  append_once "$config_target" "dtparam=i2c_arm=on"
+  append_once "$config_target" "dtparam=spi=on"
+  append_once "$config_target" "max_usb_current=1"
+  append_once "$config_target" "usb_max_current_enable=1"
+  append_once "$config_target" "dtoverlay=dwc2,dr_mode=host"
+
+  if [[ "$DISABLE_WIFI" -eq 1 ]]; then
+    append_once "$config_target" "dtoverlay=disable-wifi"
+  fi
+  if [[ "$DISABLE_BLUETOOTH" -eq 1 ]]; then
+    append_once "$config_target" "dtoverlay=disable-bt"
+  fi
+
+  append_cmdline_arg "$cmdline_txt" "alpine_dev=LABEL=ALPINE"
+  append_cmdline_arg "$cmdline_txt" "apkovl=${HOSTNAME}.apkovl.tar.gz"
+}
 
 cleanup_on_exit() {
   local status=$?
-  if [[ $status -ne 0 ]]; then
-    echo "cleanup: script failed (exit ${status}); leaving mounts in place."
-    return
+  if mountpoint -q "$SD_CARD_BOOT_DIR" 2>/dev/null; then
+    echo "cleanup: syncing and unmounting ${BOOT_DEVICE}..."
+    "${SUDO[@]}" sync
+    "${SUDO[@]}" umount "$SD_CARD_BOOT_DIR" 2>/dev/null || true
   fi
-  echo "cleanup: syncing and unmounting /dev/${SD_CARD_BOOT_DEVICE} and /dev/${SD_CARD_ROOT_DEVICE}..."
-  sudo sync
-  sudo umount "/dev/${SD_CARD_BOOT_DEVICE}" 2>/dev/null || true
-  sudo umount "/dev/${SD_CARD_ROOT_DEVICE}" 2>/dev/null || true
+  if [[ $status -ne 0 ]]; then
+    echo "build_image.sh failed with exit ${status}" >&2
+  fi
 }
 
-trap cleanup_on_exit EXIT
+SD_CARD=${1:-}
+KERNEL=${2:-kernel8}
+TYPE=${3:-drone}
+BUILD_MODE=${BUILD_MODE:-prod}
 
-# get kernel source and configure
-if [[ "${SKIP_KERNEL_BUILD}" -ne 1 ]]; then
-  if ! [ -d "${BUILD_DIR}/linux/.git" ]; then
-    if [ -d "${BUILD_DIR}/linux" ]; then
-      echo "build/linux exists but is not a git repo; remove it to re-clone"
-      exit 1
-    fi
-    echo "downloading Linux source..."
-    mkdir -p "${BUILD_DIR}" && \
-    git clone --depth=1 --branch "${RPI_LINUX_BRANCH}" https://github.com/raspberrypi/linux "${BUILD_DIR}/linux"
-    cd "$PROJECT_DIR"
-  else
-    CURRENT_LINUX_BRANCH=$(git -C "${BUILD_DIR}/linux" rev-parse --abbrev-ref HEAD)
-    if [[ "${CURRENT_LINUX_BRANCH}" != "${RPI_LINUX_BRANCH}" ]]; then
-      echo "linux source is on ${CURRENT_LINUX_BRANCH}; expected ${RPI_LINUX_BRANCH}. Remove build/linux or update RPI_LINUX_BRANCH."
-      exit 1
-    fi
-  fi
-  # get real time kernel patch
-  if [[ "${APPLY_RT_PATCH}" -eq 1 ]] && ! [ -f "${RT_PATCH_MARKER}" ]; then
-    cd "${BUILD_DIR}"
-    if ! [ -f "${RT_PATCH_TARBALL}" ]; then
-      echo "downloading real-time kernel patch..."
-      wget "${RT_PATCH_URL}"
-    fi
-    if [ -d "${RT_PATCH_DIR}" ]; then
-      if [ ! -f "${RT_PATCH_EXTRACT_MARKER}" ] || [ "$(cat "${RT_PATCH_EXTRACT_MARKER}")" != "${RT_PATCH_VERSION}" ]; then
-        rm -rf "${RT_PATCH_DIR}"
-      fi
-    fi
-    if ! [ -d "${RT_PATCH_DIR}" ]; then
-      echo "extracting real-time kernel patch"
-      tar -xf "${RT_PATCH_TARBALL}"
-      echo "${RT_PATCH_VERSION}" > "${RT_PATCH_EXTRACT_MARKER}"
-    fi
+DEFAULT_HOSTNAME=${IMAGE_HOSTNAME:-droneos}
+DEFAULT_DEV_USER_NAME=${DEV_USER_NAME:-admin}
+DEFAULT_DEV_USER_PASSWORD=${DEV_USER_PASSWORD:-adminpassword}
+DEFAULT_WIFI_SSID=${WIFI_SSID:-droneos}
+DEFAULT_WIFI_PASSWORD=${WIFI_PASSWORD:-X0YhW2Wy2bmtKXkT2ST61v2SdBk4FGgE}
+DEFAULT_WIFI_COUNTRY=${WIFI_COUNTRY:-US}
 
-    echo "applying real-time kernel patch..."
-    cd linux
-    KERNEL_VERSION=$(make -s kernelversion)
-    if [[ "${KERNEL_VERSION}" != "${RT_PATCH_BASE}" ]]; then
-      echo "kernel version ${KERNEL_VERSION} does not match RT patch base ${RT_PATCH_BASE}; update RT_PATCH_VERSION or RPI_LINUX_BRANCH"
-      exit 1
-    fi
-    if ! git am "${RT_PATCH_DIR}"/*.patch; then
-      git am --abort || true
-      echo "real-time kernel patch failed to apply"
-      exit 1
-    fi
-    touch "${RT_PATCH_MARKER}"
-    cd "$PROJECT_DIR"
-  elif [[ "${APPLY_RT_PATCH}" -ne 1 ]]; then
-    echo "skipping real-time kernel patch (APPLY_RT_PATCH=${APPLY_RT_PATCH})"
-  fi
-else
-  echo "skipping custom kernel build (SKIP_KERNEL_BUILD=${SKIP_KERNEL_BUILD})"
-fi
-
-# determine which image to get
-if [[ "$KERNEL" == "kernel" || "$KERNEL" == "kernel7l" ]]; then
-  if [[ "$TYPE" == "base" ]]; then
-    IMAGE_ARCH_DIR="raspios_arm64"
-    IMAGE_ARCH_SUFFIX="arm64"
-    IMAGE_FLAVOR="${RPI_OS_FLAVOR_BASE}"
-  elif [[ "$TYPE" == "drone" ]]; then
-    IMAGE_ARCH_DIR="raspios_lite_armhf"
-    IMAGE_ARCH_SUFFIX="armhf-lite"
-    IMAGE_FLAVOR="${RPI_OS_FLAVOR_DRONE}"
-  fi
-elif [[ "$KERNEL" == "kernel8" ]]; then
-  if [[ "$TYPE" == "base" ]]; then
-    IMAGE_ARCH_DIR="raspios_arm64"
-    IMAGE_ARCH_SUFFIX="arm64"
-    IMAGE_FLAVOR="${RPI_OS_FLAVOR_BASE}"
-  elif [[ "$TYPE" == "drone" ]]; then
-    IMAGE_ARCH_DIR="raspios_lite_arm64"
-    IMAGE_ARCH_SUFFIX="arm64-lite"
-    IMAGE_FLAVOR="${RPI_OS_FLAVOR_DRONE}"
-  fi
-fi
-IMAGE_FILE_XZ="${RPI_OS_DATE}-${IMAGE_FLAVOR}-${RPI_OS_SERIES}-${IMAGE_ARCH_SUFFIX}.img.xz"
-IMAGE_FILE="${IMAGE_FILE_XZ%.xz}"
-IMAGE_URL="https://downloads.raspberrypi.com/${IMAGE_ARCH_DIR}/images/${IMAGE_ARCH_DIR}-${RPI_OS_DATE}/${IMAGE_FILE_XZ}"
-
-if ! [ -f "${RPI_OS_CACHE_DIR}/${IMAGE_FILE_XZ}" ]; then
-  echo "downloading image..."
-  wget -O "${RPI_OS_CACHE_DIR}/${IMAGE_FILE_XZ}" "${IMAGE_URL}"
-fi
-if ! [ -f "${RPI_OS_CACHE_DIR}/${IMAGE_FILE}" ]; then
-  echo "decompressing image..."
-  xz --threads=${THREADS} --keep -d "${RPI_OS_CACHE_DIR}/${IMAGE_FILE_XZ}"
-fi
-echo "writing image to sd card..."
-sudo dd bs=1M if="${RPI_OS_CACHE_DIR}/${IMAGE_FILE}" of=/dev/"${SD_CARD}" status=progress conv=fsync
-sudo partprobe /dev/"${SD_CARD}"
-sudo udevadm settle
-if [[ ! -b /dev/"${SD_CARD_BOOT_DEVICE}" || ! -b /dev/"${SD_CARD_ROOT_DEVICE}" ]]; then
-  echo "partition devices not found after imaging: /dev/${SD_CARD_BOOT_DEVICE} /dev/${SD_CARD_ROOT_DEVICE}"
+if [[ -z "$SD_CARD" ]]; then
+  usage
   exit 1
 fi
 
-echo "building droneOS binary..."
-if [[ $ARM == "aarch64" ]]; then
-  bash build.sh ${TYPE} arm64
-elif [[ $ARM == "arm" ]]; then
-  bash build.sh ${TYPE} arm
-fi
-
-echo "filesystem and user configuration..."
-mkdir -p "${SD_CARD_BOOT_DIR}"
-mkdir -p "${SD_CARD_ROOT_DIR}"
-sudo mount /dev/"${SD_CARD_BOOT_DEVICE}" "${SD_CARD_BOOT_DIR}"
-sudo mount /dev/"${SD_CARD_ROOT_DEVICE}" "${SD_CARD_ROOT_DIR}"
-# create user in rootfs to avoid first-boot user setup
-PASSWORD_ENCRYPTED=$(echo "$USER_PASSWORD" | openssl passwd -6 -stdin)
-# preseed first-boot user configuration to avoid rename prompts
-echo "${USER_NAME}:${PASSWORD_ENCRYPTED}" | sudo tee "${SD_CARD_BOOT_DIR}"/userconf.txt >/dev/null
-sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/
-if ! sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /usr/bin/id -u "${USER_NAME}" >/dev/null 2>&1; then
-  if ! sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /usr/sbin/useradd -m -s /bin/bash -G sudo "${USER_NAME}"; then
-    echo "warning: useradd failed; falling back to userconf.txt for first boot"
-    echo "${USER_NAME}:${PASSWORD_ENCRYPTED}" | sudo tee "${SD_CARD_BOOT_DIR}"/userconf.txt >/dev/null
+if [[ $# -ge 9 ]]; then
+  HOSTNAME=${4:-$DEFAULT_HOSTNAME}
+  DEV_USER_NAME=${5:-$DEFAULT_DEV_USER_NAME}
+  DEV_USER_PASSWORD=${6:-$DEFAULT_DEV_USER_PASSWORD}
+  WIFI_SSID=${7:-$DEFAULT_WIFI_SSID}
+  WIFI_PASSWORD=${8:-$DEFAULT_WIFI_PASSWORD}
+  WIFI_COUNTRY=${9:-$DEFAULT_WIFI_COUNTRY}
+  if [[ $# -gt 9 ]]; then
+    echo "warning: ignoring arguments after wifi_country" >&2
   fi
-fi
-if sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /usr/bin/id -u "${USER_NAME}" >/dev/null 2>&1; then
-  printf '%s:%s\n' "${USER_NAME}" "${PASSWORD_ENCRYPTED}" | \
-    sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /usr/sbin/chpasswd -e
-  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /usr/bin/chown -Rv "${USER_NAME}":"${USER_NAME}" /home/"${USER_NAME}"
+elif [[ $# -eq 8 ]]; then
+  HOSTNAME=$DEFAULT_HOSTNAME
+  DEV_USER_NAME=${4:-$DEFAULT_DEV_USER_NAME}
+  DEV_USER_PASSWORD=${5:-$DEFAULT_DEV_USER_PASSWORD}
+  WIFI_SSID=${6:-$DEFAULT_WIFI_SSID}
+  WIFI_PASSWORD=${7:-$DEFAULT_WIFI_PASSWORD}
+  WIFI_COUNTRY=${8:-$DEFAULT_WIFI_COUNTRY}
 else
-  # If user creation failed, ensure userconf.txt exists for first boot.
-  echo "${USER_NAME}:${PASSWORD_ENCRYPTED}" | sudo tee "${SD_CARD_BOOT_DIR}"/userconf.txt >/dev/null
-fi
-# disable first-boot user prompts if present
-sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c \
-  'systemctl disable userconf-pi.service userconf.service 2>/dev/null || true'
-# add user to device access groups if they exist
-if sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /usr/bin/id -u "${USER_NAME}" >/dev/null 2>&1; then
-  DEVICE_GROUPS=(dialout plugdev gpio i2c spi video input netdev)
-  for group in "${DEVICE_GROUPS[@]}"; do
-    if sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /usr/bin/getent group "$group" >/dev/null 2>&1; then
-      sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /usr/sbin/usermod -a -G "$group" "${USER_NAME}"
-    fi
-  done
-fi
-# enable ssh
-sudo touch "${SD_CARD_BOOT_DIR}"/ssh
-
-# set up SSH key authentication for passwordless access
-echo "setting up SSH key authentication..."
-HOST_SSH_KEY=""
-# Try to find an existing SSH public key on the host
-if [ -f ~/.ssh/id_ed25519.pub ]; then
-  HOST_SSH_KEY=$(cat ~/.ssh/id_ed25519.pub)
-elif [ -f ~/.ssh/id_rsa.pub ]; then
-  HOST_SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
-elif [ -f ~/.ssh/id_ecdsa.pub ]; then
-  HOST_SSH_KEY=$(cat ~/.ssh/id_ecdsa.pub)
+  HOSTNAME=${4:-$DEFAULT_HOSTNAME}
+  DEV_USER_NAME=${5:-$DEFAULT_DEV_USER_NAME}
+  DEV_USER_PASSWORD=${6:-$DEFAULT_DEV_USER_PASSWORD}
+  WIFI_SSID=${7:-$DEFAULT_WIFI_SSID}
+  WIFI_PASSWORD=${8:-$DEFAULT_WIFI_PASSWORD}
+  WIFI_COUNTRY=${9:-$DEFAULT_WIFI_COUNTRY}
 fi
 
-# If no key exists, generate one
-if [ -z "$HOST_SSH_KEY" ]; then
-  echo "no SSH key found on host, generating new ed25519 key..."
-  ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -C "$(whoami)@$(hostname)"
-  HOST_SSH_KEY=$(cat ~/.ssh/id_ed25519.pub)
+DEV_PROJECT_DIR=${DEV_PROJECT_DIR:-"/home/${DEV_USER_NAME}/droneOS"}
+
+if ! [[ "$HOSTNAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  echo "invalid hostname: ${HOSTNAME}" >&2
+  exit 1
 fi
 
-# Add the SSH key to the user's authorized_keys in the image
-if [ -n "$HOST_SSH_KEY" ]; then
-  sudo mkdir -p "${SD_CARD_ROOT_DIR}/home/${USER_NAME}/.ssh"
-  echo "$HOST_SSH_KEY" | sudo tee "${SD_CARD_ROOT_DIR}/home/${USER_NAME}/.ssh/authorized_keys" >/dev/null
-  sudo chmod 700 "${SD_CARD_ROOT_DIR}/home/${USER_NAME}/.ssh"
-  sudo chmod 600 "${SD_CARD_ROOT_DIR}/home/${USER_NAME}/.ssh/authorized_keys"
-  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c \
-    "chown -R ${USER_NAME}:${USER_NAME} /home/${USER_NAME}/.ssh"
-  echo "✓ SSH key added to ${USER_NAME}@drone authorized_keys"
+case "$TYPE" in
+  base|drone) ;;
+  *)
+    echo "unsupported image type: ${TYPE} (use base or drone)" >&2
+    exit 1
+    ;;
+esac
+
+case "$KERNEL" in
+  kernel8)
+    DEFAULT_ALPINE_ARCH=aarch64
+    ;;
+  kernel7|kernel7l)
+    DEFAULT_ALPINE_ARCH=armv7
+    ;;
+  kernel)
+    DEFAULT_ALPINE_ARCH=armhf
+    ;;
+  *)
+    echo "unsupported kernel variant: ${KERNEL} (use kernel, kernel7, kernel7l, or kernel8)" >&2
+    exit 1
+    ;;
+esac
+
+if [[ "$(id -u)" -eq 0 ]]; then
+  SUDO=()
 else
-  echo "warning: could not set up SSH key authentication"
+  SUDO=(sudo)
+  require_command sudo
 fi
 
-echo "setting wifi country..."
-sudo mkdir -p "${SD_CARD_ROOT_DIR}"/etc/modprobe.d
-echo "REGDOMAIN=${WIFI_COUNTRY}" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/default/crda
-echo "options cfg80211 ieee80211_regdom=${WIFI_COUNTRY}" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/modprobe.d/cfg80211.conf
+for cmd in basename cp grep install lsblk mkdir mount mountpoint sed sort tail tar umount wget; do
+  require_command "$cmd"
+done
+for cmd in mkfs.vfat partprobe sfdisk sync; do
+  require_command "$cmd"
+done
 
-echo "setting up wifi network..."
-if [[ $TYPE == "base" ]]; then
-  UNIT_FILE=$(cat <<EOF
-[Unit]
-Description=Start droneOS wifi network
-Wants=NetworkManager.service
-Requires=sys-subsystem-net-devices-wlan0.device
-After=NetworkManager.service sys-subsystem-net-devices-wlan0.device
-
-[Service]
-Type=oneshot
-ExecStartPre=/usr/bin/nmcli radio wifi on
-ExecStartPre=/usr/bin/nmcli device set wlan0 managed yes
-ExecStart=/usr/bin/nmcli device wifi hotspot ifname wlan0 ssid "${SSID}" password "${SSID_PASSWORD}"
-RemainAfterExit=yes
-Restart=on-failure
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOF
-)
-  echo "$UNIT_FILE" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/systemd/system/droneOSNetwork.service
-  # chroot to filesystem and enable wifi startup script
-  sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/ && \
-  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable NetworkManager.service' && \
-  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOSNetwork.service' && \
-  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable ssh'
-elif [[ $TYPE == "drone" ]]; then
-  UUID=$(uuidgen)
-  sudo mkdir -p "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections
-NM_FILE=$(cat <<EOF
-[connection]
-id=droneOS
-uuid=${UUID}
-type=wifi
-interface-name=wlan0
-autoconnect=true
-autoconnect-retries=0
-autoconnect-priority=100
-
-[wifi]
-mode=infrastructure
-ssid=${SSID}
-
-[wifi-security]
-auth-alg=open
-key-mgmt=wpa-psk
-psk=${SSID_PASSWORD}
-
-[ipv4]
-method=auto
-
-[ipv6]
-method=ignore
-EOF
-)
-  echo "$NM_FILE" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections/"${SSID}".nmconnection && \
-  sudo chmod -Rv 600 "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections/"${SSID}".nmconnection && \
-  sudo chown -Rv root:root "${SD_CARD_ROOT_DIR}"/etc/NetworkManager/system-connections/"${SSID}".nmconnection
-  sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/ && \
-  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable NetworkManager.service' && \
-  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable NetworkManager-wait-online.service' && \
-  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable ssh'
-fi
-
-echo "setting up IP print service..."
-IP_UNIT_FILE=$(cat <<'EOF'
-[Unit]
-Description=Print droneOS IP on console
-After=network-online.target NetworkManager.service
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/bin/bash -c 'ip=$(/usr/bin/nmcli -t -f IP4.ADDRESS dev show wlan0 | /usr/bin/head -n1 | /usr/bin/cut -d: -f2 | /usr/bin/cut -d/ -f1); echo "droneOS IP: ${ip:-unknown}" | /usr/bin/tee /dev/tty1'
-
-[Install]
-WantedBy=multi-user.target
-EOF
-)
-echo "$IP_UNIT_FILE" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/systemd/system/droneOSPrintIP.service
-sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/ && \
-sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOSPrintIP.service'
-
-cd "$PROJECT_DIR"
-
-echo "building Linux kernel..."
-if [[ "${SKIP_KERNEL_BUILD}" -ne 1 ]] && [ -d "build/linux" ]; then
-  # add configs for kernel build
-  cd "${BUILD_DIR}"/linux && \
-  cp "$PROJECT_DIR"/configs/.config . && \
-  sudo mkdir -p "${SD_CARD_BOOT_DIR}"/overlays/ && \
-  sudo cp "$PROJECT_DIR"/configs/config-"${KERNEL}".txt "${SD_CARD_BOOT_DIR}"
-  # compile and install kernel
-  if [[ "$KERNEL" == "kernel" ]]; then
-    make -j${THREADS} KERNEL="$KERNEL" ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- bcmrpi_defconfig && \
-    make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- Image modules dtbs && \
-    sudo env PATH="$PATH" make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH="${SD_CARD_ROOT_DIR}" modules_install && \
-    sudo cp arch/arm/boot/dts/broadcom/*.dtb "${SD_CARD_BOOT_DIR}"/ && \
-    sudo cp arch/arm/boot/dts/overlays/*.dtb* "${SD_CARD_BOOT_DIR}"/overlays/ && \
-    sudo cp arch/arm/boot/dts/overlays/README "${SD_CARD_BOOT_DIR}"/overlays/
-  elif [[ "$KERNEL" == "kernel7" ]]; then
-    make -j${THREADS} KERNEL="$KERNEL" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig && \
-    make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- Image modules dtbs && \
-    sudo env PATH="$PATH" make -j${THREADS} ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH="${SD_CARD_ROOT_DIR}" modules_install && \
-    sudo cp arch/arm/boot/dts/broadcom/*.dtb "${SD_CARD_BOOT_DIR}"/ && \
-    sudo cp arch/arm/boot/dts/overlays/*.dtb* "${SD_CARD_BOOT_DIR}"/overlays/ && \
-    sudo cp arch/arm/boot/dts/overlays/README "${SD_CARD_BOOT_DIR}"/overlays/
-  elif [[ "$KERNEL" == "kernel8" ]]; then
-    make -j${THREADS} KERNEL="$KERNEL" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig && \
-    make -j${THREADS} ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image modules dtbs && \
-    sudo env PATH="$PATH" make -j${THREADS} ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH="${SD_CARD_ROOT_DIR}" modules_install && \
-    sudo cp arch/arm64/boot/Image "${SD_CARD_BOOT_DIR}"/"$KERNEL".img && \
-    sudo cp arch/arm64/boot/dts/broadcom/*.dtb "${SD_CARD_BOOT_DIR}"/ && \
-    sudo cp arch/arm64/boot/dts/overlays/*.dtb* "${SD_CARD_BOOT_DIR}"/overlays/ && \
-    sudo cp arch/arm64/boot/dts/overlays/README "${SD_CARD_BOOT_DIR}"/overlays/
-  fi
-  cd "$PROJECT_DIR"
-fi
-
-# install droneOS binary and config
-echo "installing droneOS binary and config..."
-sudo mkdir -p "$INSTALL_DIR" && \
-sudo cp ${TYPE}.bin "$INSTALL_DIR" && \
-sudo cp configs/config.yaml "$INSTALL_DIR"
-
-echo "setting up systemd unit file..."
-if [[ $TYPE == "base" ]]; then
-  UNIT_FILE=$(cat <<'EOF'
-[Unit]
-Description=Start droneOS application
-Requires=droneOSNetwork.service
-After=droneOSNetwork.service
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/droneOS/
-ExecStart=/opt/droneOS/base.bin --config-file config.yaml
-ExecReload=/bin/kill -s HUP $MAINPID
-RestartSec=5
-Restart=on-failure
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-EOF
-)
-elif [[ $TYPE == "drone" ]]; then
-  UNIT_FILE=$(cat <<'EOF'
-[Unit]
-Description=Start droneOS application
-After=network-online.target NetworkManager.service
-Wants=network-online.target
-# Wait for USB devices to settle before starting
-After=systemd-udev-settle.service
-Wants=systemd-udev-settle.service
-# Limit restart attempts to prevent system stress
-StartLimitIntervalSec=300
-StartLimitBurst=5
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/droneOS/
-ExecStart=/opt/droneOS/drone.bin --config-file config.yaml
-ExecReload=/bin/kill -s HUP $MAINPID
-# Longer restart delay to prevent rapid restart loops
-RestartSec=10
-Restart=on-failure
-StandardOutput=null
-StandardError=null
-# Nice level to reduce priority (less CPU stress)
-Nice=5
-# I/O scheduling to reduce disk pressure
-IOSchedulingClass=idle
-
-[Install]
-WantedBy=multi-user.target
-EOF
-)
-fi
-echo "$UNIT_FILE" | sudo tee "${SD_CARD_ROOT_DIR}"/etc/systemd/system/droneOS.service && \
-# chroot to filesystem and enable wifi startup script
-sudo cp /usr/bin/qemu-${ARM}-static "${SD_CARD_ROOT_DIR}"/usr/bin/
-
-# Enable droneOS service based on build mode
-if [[ "${ENABLE_DRONEOS_SERVICE}" -eq 1 ]]; then
-  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c 'systemctl enable droneOS.service'
-  echo "droneOS service enabled (will start on boot)"
-else
-  echo "droneOS service disabled (use pi_runner.sh or manually start for development)"
-fi
-
-# optionally install pisugar power manager
-if [[ "${INSTALL_PISUGAR}" -eq 1 ]]; then
-  echo "preparing PiSugar power manager installation..."
-
-  # determine architecture for package download
-  if [[ "$ARM" == "aarch64" ]]; then
-    PISUGAR_ARCH="arm64"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUILD_DIR=${BUILD_DIR:-"${PROJECT_DIR}/build"}
+ALPINE_MIRROR=${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
+ALPINE_BRANCH=${ALPINE_BRANCH:-latest-stable}
+ALPINE_ARCH=${ALPINE_ARCH:-$DEFAULT_ALPINE_ARCH}
+ALPINE_CACHE_DIR=${ALPINE_CACHE_DIR:-"${BUILD_DIR}/alpine"}
+if [[ -z "${DISABLE_WIFI+x}" ]]; then
+  if [[ "$BUILD_MODE" == "dev" ]]; then
+    DISABLE_WIFI=0
   else
-    PISUGAR_ARCH="armhf"
+    DISABLE_WIFI=1
   fi
+fi
+DISABLE_BLUETOOTH=${DISABLE_BLUETOOTH:-1}
+SKIP_KERNEL_BUILD=${SKIP_KERNEL_BUILD:-1}
+INSTALL_PISUGAR=${INSTALL_PISUGAR:-0}
 
-  PISUGAR_VERSION="2.3.2"
-  PISUGAR_DEB_VERSION="-1"
-  PISUGAR_SERVER_PKG="pisugar-server_${PISUGAR_VERSION}${PISUGAR_DEB_VERSION}_${PISUGAR_ARCH}.deb"
-  PISUGAR_POWEROFF_PKG="pisugar-poweroff_${PISUGAR_VERSION}${PISUGAR_DEB_VERSION}_${PISUGAR_ARCH}.deb"
-  PISUGAR_PROGRAMMER_PKG="pisugar-programmer_${PISUGAR_VERSION}${PISUGAR_DEB_VERSION}_${PISUGAR_ARCH}.deb"
+case "$ALPINE_ARCH" in
+  aarch64)
+    BUILD_ARCH=arm64
+    BUILD_GOARM=""
+    ;;
+  armv7)
+    BUILD_ARCH=armv7
+    BUILD_GOARM=${GOARM:-7}
+    ;;
+  armhf)
+    BUILD_ARCH=arm
+    BUILD_GOARM=${GOARM:-6}
+    ;;
+  *)
+    echo "unsupported ALPINE_ARCH: ${ALPINE_ARCH} (use aarch64, armv7, or armhf)" >&2
+    exit 1
+    ;;
+esac
 
-  # download packages if not cached
-  mkdir -p "${BUILD_DIR}/pisugar"
-  cd "${BUILD_DIR}/pisugar"
+if [[ "$SKIP_KERNEL_BUILD" -ne 1 ]]; then
+  echo "custom Raspberry Pi kernel builds are not part of the Alpine diskless image flow; use the Alpine rpi kernel or provide a custom tarball" >&2
+  exit 1
+fi
 
-  for pkg in "${PISUGAR_SERVER_PKG}" "${PISUGAR_POWEROFF_PKG}" "${PISUGAR_PROGRAMMER_PKG}"; do
-    if ! [ -f "${pkg}" ]; then
-      echo "downloading ${pkg}..."
-      wget -q "http://cdn.pisugar.com/release/${pkg}"
-    fi
-  done
+if [[ "$INSTALL_PISUGAR" -ne 0 ]]; then
+  echo "INSTALL_PISUGAR used Debian packages and is not supported by the Alpine image builder" >&2
+  exit 1
+fi
 
-  cd "${PROJECT_DIR}"
-
-  # copy packages to rootfs
-  sudo mkdir -p "${SD_CARD_ROOT_DIR}"/tmp/pisugar
-  sudo cp "${BUILD_DIR}"/pisugar/*.deb "${SD_CARD_ROOT_DIR}"/tmp/pisugar/
-
-  # install packages in chroot
-  echo "installing PiSugar packages..."
-  if ! sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c \
-    'dpkg -i /tmp/pisugar/*.deb 2>/dev/null || apt-get install -f -y'; then
-    echo "warning: PiSugar installation encountered issues but continuing..."
-    # don't fail the entire build if pisugar install has issues
-    true
-  fi
-
-  # enable i2c interface
-  echo "enabling I2C interface..."
-  if [ -f "${SD_CARD_BOOT_DIR}/config.txt" ]; then
-    if ! grep -q "^dtparam=i2c_arm=on" "${SD_CARD_BOOT_DIR}/config.txt"; then
-      echo "dtparam=i2c_arm=on" | sudo tee -a "${SD_CARD_BOOT_DIR}/config.txt" >/dev/null
-    fi
-  fi
-
-  # clean up
-  sudo rm -rf "${SD_CARD_ROOT_DIR}"/tmp/pisugar
-
-  echo "PiSugar power manager installed. Access web UI at http://<pi-ip>:8421 after boot."
+if [[ "$BUILD_MODE" == "prod" ]]; then
+  ENABLE_DRONEOS_SERVICE=1
+  ENABLE_DEV_ACCESS=0
+  echo "Production mode: droneOS OpenRC service enabled"
+elif [[ "$BUILD_MODE" == "dev" ]]; then
+  ENABLE_DRONEOS_SERVICE=0
+  ENABLE_DEV_ACCESS=1
+  echo "Development mode: droneOS OpenRC service disabled, WiFi/SSH enabled"
 else
-  echo "skipping PiSugar installation (INSTALL_PISUGAR=${INSTALL_PISUGAR})"
+  echo "unsupported BUILD_MODE: ${BUILD_MODE} (use prod or dev)" >&2
+  exit 1
 fi
 
-# enable OverlayFS (read-only root filesystem with RAM overlay)
-if [[ "${ENABLE_OVERLAYFS}" -eq 1 ]]; then
-  echo "enabling OverlayFS for read-only root filesystem..."
+DEVICE=$(normalize_device "$SD_CARD")
+BOOT_DEVICE=$(partition_path "$DEVICE" 1)
+MOUNT_BASE=${MOUNT_BASE:-/tmp/droneos_mnt}
+SD_CARD_BOOT_DIR="${MOUNT_BASE}/alpine_boot"
+BINARY_PATH="${BUILD_DIR}/droneOS/${TYPE}.bin"
+APKVOL_STAGING="${BUILD_DIR}/apkovl/${HOSTNAME}"
+APKVOL_FILE="${BUILD_DIR}/apkovl/${HOSTNAME}.apkovl.tar.gz"
+DEV_APK_CACHE_DIR="${BUILD_DIR}/dev-apks/${ALPINE_BRANCH}/${ALPINE_ARCH}/${TYPE}"
 
-  # Install overlayroot package in chroot
-  echo "installing overlayroot package..."
-  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c \
-    'apt-get update && apt-get install -y overlayroot' || {
-      echo "warning: overlayroot package installation failed"
-    }
-
-  # Configure overlayroot
-  sudo tee "${SD_CARD_ROOT_DIR}/etc/overlayroot.conf" >/dev/null <<'EOF'
-overlayroot="tmpfs"
-overlayroot_cfgdisk="disabled"
-EOF
-
-  # Create systemd service to enable overlayroot on first boot
-  sudo tee "${SD_CARD_ROOT_DIR}/etc/systemd/system/enable-overlayroot.service" >/dev/null <<'EOF'
-[Unit]
-Description=Enable OverlayFS Root Filesystem
-ConditionPathExists=!/var/lib/overlayroot-enabled
-
-[Service]
-Type=oneshot
-ExecStart=/bin/bash -c 'echo overlayroot=\"tmpfs\" > /etc/overlayroot.conf && touch /var/lib/overlayroot-enabled'
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-  sudo chroot "${SD_CARD_ROOT_DIR}" /usr/bin/qemu-${ARM}-static /bin/bash -c \
-    'systemctl enable enable-overlayroot.service' || true
-
-  echo "OverlayFS will be enabled on first boot. Root filesystem will be read-only with changes in RAM."
-  echo "To disable: edit /etc/overlayroot.conf and set overlayroot=\"\" or disabled, then reboot"
-  echo "Note: Use 'sudo overlayroot-chroot' to make persistent changes when overlay is active"
-else
-  echo "skipping OverlayFS setup (BUILD_MODE=${BUILD_MODE})"
-  echo "To enable production mode with OverlayFS: BUILD_MODE=prod bash build_image.sh ..."
+if [[ ! -b "$DEVICE" ]]; then
+  echo "block device not found: ${DEVICE}" >&2
+  exit 1
 fi
 
-# Configure journald to reduce disk writes and prevent filesystem corruption
-echo "configuring journald for reduced disk I/O..."
-sudo mkdir -p "${SD_CARD_ROOT_DIR}/etc/systemd/journald.conf.d"
-sudo tee "${SD_CARD_ROOT_DIR}/etc/systemd/journald.conf.d/droneos.conf" >/dev/null <<'EOF'
-[Journal]
-# Store logs in RAM to reduce SD card wear
-Storage=volatile
-# Limit RAM usage for logs
-RuntimeMaxUse=50M
-# Reduce sync frequency to minimize disk writes
-SyncIntervalSec=60s
-# Rate limit to prevent log floods
-RateLimitIntervalSec=30s
-RateLimitBurst=10000
-EOF
+resolve_alpine_tarball
 
-echo "journald configured for volatile storage (logs in RAM only)"
-
-# Add kernel parameters to improve filesystem stability
-echo "configuring kernel parameters for filesystem stability..."
-if [ -d "${SD_CARD_BOOT_DIR}/firmware" ]; then
-  BOOT_CONFIG_DIR="${SD_CARD_BOOT_DIR}/firmware"
-else
-  BOOT_CONFIG_DIR="${SD_CARD_BOOT_DIR}"
-fi
-
-if [ -f "${BOOT_CONFIG_DIR}/cmdline.txt" ]; then
-  # Add filesystem mount options for better stability and error handling
-  if ! grep -q "rootflags=" "${BOOT_CONFIG_DIR}/cmdline.txt"; then
-    sudo sed -i '1s/$/ rootflags=commit=120,errors=remount-ro/' "${BOOT_CONFIG_DIR}/cmdline.txt"
-    echo "added rootflags=commit=120,errors=remount-ro for filesystem stability"
+if [[ "$ENABLE_DEV_ACCESS" -eq 1 ]]; then
+  require_command apk
+  require_command openssl
+  require_command ssh-keygen
+  if ! [[ "$DEV_USER_NAME" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+    echo "invalid dev username: ${DEV_USER_NAME}" >&2
+    exit 1
   fi
-  # Add fsck options to check/repair filesystem on boot
-  if ! grep -q "fsck.mode=" "${BOOT_CONFIG_DIR}/cmdline.txt"; then
-    sudo sed -i '1s/$/ fsck.mode=force fsck.repair=yes/' "${BOOT_CONFIG_DIR}/cmdline.txt"
-    echo "enabled automatic filesystem check and repair on boot"
+  find_host_ssh_key
+  fetch_dev_apks
+fi
+
+if [[ "$ENABLE_DRONEOS_SERVICE" -eq 1 ]]; then
+  echo "building ${TYPE} binary for Alpine ${ALPINE_ARCH}..."
+  if [[ -n "$BUILD_GOARM" ]]; then
+    GOARM="$BUILD_GOARM" OUTPUT="$BINARY_PATH" bash "$PROJECT_DIR/build.sh" "$TYPE" "$BUILD_ARCH"
+  else
+    OUTPUT="$BINARY_PATH" bash "$PROJECT_DIR/build.sh" "$TYPE" "$BUILD_ARCH"
   fi
+else
+  echo "skipping ${TYPE} binary build for development image"
 fi
 
-# Configure fstab to reduce writes and improve error handling
-echo "configuring fstab for reduced writes and better error handling..."
-if [ -f "${SD_CARD_ROOT_DIR}/etc/fstab" ]; then
-  # Add noatime, commit, and errors=remount-ro for better stability
-  sudo sed -i 's|\(^[^#].*\s/\s.*\)defaults|\1defaults,noatime,commit=120,errors=remount-ro|' "${SD_CARD_ROOT_DIR}/etc/fstab"
-  echo "added noatime, commit=120, and errors=remount-ro to root filesystem mount options"
+echo "creating Alpine OpenRC overlay..."
+create_openrc_overlay "$APKVOL_STAGING" "$APKVOL_FILE"
+
+trap cleanup_on_exit EXIT
+
+echo "partitioning ${DEVICE} for Alpine Raspberry Pi boot media..."
+unmount_existing_partitions
+printf 'label: dos\nstart=2048, type=c, bootable\n' | "${SUDO[@]}" sfdisk --wipe always "$DEVICE"
+"${SUDO[@]}" partprobe "$DEVICE" 2>/dev/null || true
+for _ in {1..10}; do
+  [[ -b "$BOOT_DEVICE" ]] && break
+  sleep 1
+done
+if [[ ! -b "$BOOT_DEVICE" ]]; then
+  echo "partition device not found after partitioning: ${BOOT_DEVICE}" >&2
+  exit 1
 fi
 
-# Add USB power management to prevent brownouts
-echo "configuring USB power management..."
-sudo tee -a "${BOOT_CONFIG_DIR}/config.txt" >/dev/null <<'EOF'
+echo "formatting ${BOOT_DEVICE} as FAT32..."
+"${SUDO[@]}" mkfs.vfat -F 32 -n ALPINE "$BOOT_DEVICE"
 
-# USB and power configuration for LoRa radio stability
-max_usb_current=1
-usb_max_current_enable=1
-# Disable USB power management to prevent device resets
-dtoverlay=dwc2,dr_mode=host
-EOF
-echo "USB power settings configured for LoRa radio"
+mkdir -p "$SD_CARD_BOOT_DIR"
+"${SUDO[@]}" mount "$BOOT_DEVICE" "$SD_CARD_BOOT_DIR"
 
-# cleanup handled by trap on successful exit
+echo "extracting ${ALPINE_IMAGE_FILE}..."
+"${SUDO[@]}" tar -xzf "$ALPINE_IMAGE_PATH" -C "$SD_CARD_BOOT_DIR"
+
+if [[ "$ENABLE_DEV_ACCESS" -eq 1 ]]; then
+  echo "installing local Alpine dev APK cache..."
+  "${SUDO[@]}" mkdir -p "${SD_CARD_BOOT_DIR}/droneos-apks/${ALPINE_ARCH}"
+  "${SUDO[@]}" cp "${DEV_APK_CACHE_DIR}"/*.apk "${SD_CARD_BOOT_DIR}/droneos-apks/${ALPINE_ARCH}/"
+fi
+
+echo "installing droneOS Alpine overlay..."
+"${SUDO[@]}" cp "$APKVOL_FILE" "${SD_CARD_BOOT_DIR}/${HOSTNAME}.apkovl.tar.gz"
+write_boot_config
+
+echo "Alpine image build complete for ${DEVICE}"
+echo "Boot media: ${BOOT_DEVICE}"
+echo "Service: $([[ "$ENABLE_DRONEOS_SERVICE" -eq 1 ]] && printf enabled || printf disabled)"
+if [[ "$ENABLE_DEV_ACCESS" -eq 1 ]]; then
+  echo "Dev SSH user: ${DEV_USER_NAME}"
+fi
+
+# cleanup handled by trap

@@ -1,29 +1,55 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-TINYGO_VERSION="0.33.0"
-SDL2_VERSION="2.0.8"
+if ! command -v apk >/dev/null 2>&1; then
+  echo "setup.sh now targets Alpine Linux hosts. Run this on Alpine or install the equivalent packages manually." >&2
+  exit 1
+fi
 
-# install build dependencies
-sudo snap install go
-sudo apt install -y \
+if [[ "$(id -u)" -eq 0 ]]; then
+  SUDO=()
+else
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "setup.sh needs sudo when run as a non-root user" >&2
+    exit 1
+  fi
+  SUDO=(sudo)
+fi
+
+# Host tools for static Go builds, Alpine Raspberry Pi media creation, and
+# optional Raspberry Pi kernel work.
+"${SUDO[@]}" apk update
+"${SUDO[@]}" apk add --no-cache \
+  bash \
   bc \
   bison \
+  build-base \
+  coreutils \
+  curl \
+  dosfstools \
+  e2fsprogs \
   flex \
-  libssl-dev \
+  git \
+  go \
+  linux-headers \
   make \
-  libc6-dev \
-  libncurses5-dev \
-  crossbuild-essential-arm64 \
-  crossbuild-essential-armhf \
-  qemu-user-static \
-  gcc-arm-linux-gnueabi
+  mtools \
+  ncurses-dev \
+  openssh-client \
+  openssh-keygen \
+  openssl \
+  openssl-dev \
+  perl \
+  rsync \
+  tar \
+  util-linux \
+  wget \
+  xz
 
-# create build directory
 mkdir -p build/droneOS
 
-cd build
-# xpad
-#sudo git clone https://github.com/paroj/xpad.git /usr/src/xpad-0.4
-#sudo dkms install -m xpad -v 0.4
-
-sudo usermod -aG dialout,plugdev,input $USER
+for group in dialout plugdev input gpio i2c spi video; do
+  if grep -q "^${group}:" /etc/group; then
+    "${SUDO[@]}" addgroup "$USER" "$group" 2>/dev/null || true
+  fi
+done

@@ -1,375 +1,171 @@
 # droneOS
 
-A Go-based real-time operating system for autonomous drone flight with remote control capabilities.
+A Go runtime for autonomous drone flight with pluggable drivers, radio transport, and control algorithms.
 
-> ⚠️ **Status:** This project is actively under development and unstable. Use at your own risk.
-
-## Table of Contents
-
-- [Features](#features)
-- [Hardware Requirements](#hardware-requirements)
-- [Quick Start](#quick-start)
-- [Development](#development)
-  - [Initial Setup](#initial-setup)
-  - [Development Workflow](#development-workflow)
-  - [Building SD Card Images](#building-sd-card-images)
-  - [Testing on Hardware](#testing-on-hardware)
-- [Architecture](#architecture)
-- [Configuration](#configuration)
-- [Contributing](#contributing)
-
-## Features
-
-- **Real-time flight control** with pluggable control algorithms
-- **Dual communication** via WiFi (high-bandwidth) and LoRa radio (long-range fallback)
-- **Modular sensor/motor drivers** with hot-swappable plugins
-- **Remote debugging** with structured logging over WiFi
-- **Xbox 360 controller support** for manual piloting
-- **Obstacle avoidance** with multiple sensor types
-- **Base station** for remote monitoring and control
+> Status: this project is actively under development and unstable. Use at your own risk.
 
 ## Hardware Requirements
 
 ### Drone
-- **Raspberry Pi Zero 2 W** (recommended) or any RPi with GPIO
-- **LoRa radio module** (USB, e.g., SX1262-based)
-- **Sensors** (optional):
-  - MPU-6050 IMU (gyroscope/accelerometer)
+
+- Raspberry Pi Zero 2 W or another Raspberry Pi with GPIO
+- LoRa radio module, such as an SX1262-based USB module
+- Optional sensors:
+  - MPU-6050 IMU
   - HC-SR04 ultrasonic distance sensor
   - GT-U7 GPS module
   - Frienda IR obstacle sensor
-- **Motors/ESCs** for propulsion
-- **PiSugar3** power manager (optional, for battery monitoring)
+- Motors and ESCs for propulsion
+- PiSugar3 power manager, optional for battery monitoring
 
 ### Base Station
-- **PC** (Linux/macOS/Windows)
-- **LoRa radio module** (USB, matching drone's frequency)
-- **Xbox 360 controller** (optional, for manual control)
+
+- Linux/macOS/Windows PC
+- LoRa radio module matching the drone frequency
+- Xbox 360 controller, optional for manual piloting
 
 ## Quick Start
 
-### 1. Install Dependencies
+### 1. Install Build Dependencies
+
+Run setup on an Alpine Linux host:
 
 ```bash
 bash setup.sh
 ```
 
-This installs Go, cross-compilation toolchains, and other build dependencies.
+This installs Go, Alpine build tools, filesystem utilities, and Raspberry Pi media creation tools through `apk`.
 
-### 2. Build Development Image
+### 2. Build an Application Binary
 
 ```bash
-# Find your SD card (DO NOT skip this - wrong device = data loss!)
+# Drone for Raspberry Pi 64-bit Alpine
+bash build.sh drone arm64
+
+# Base station for the current Linux amd64 host
+bash build.sh base amd64
+```
+
+Build output is written to `build/droneOS/<type>.bin`. The default build is static (`CGO_ENABLED=0`) so the Raspberry Pi binary does not depend on Ubuntu or glibc runtime libraries.
+
+### 3. Build an Alpine SD Card
+
+Find the SD card device first. The image builder repartitions the target device.
+
+```bash
 lsblk
-
-# Unmount if mounted
-sudo umount /dev/sdb1 /dev/sdb2  # Replace sdb with your device
-
-# Build image (development mode)
-bash build_image.sh sdb kernel8 drone myuser mypassword MyWiFiSSID MyWiFiPassword US
+sudo umount /dev/sdb1 2>/dev/null || true
+bash build_image.sh sdb kernel8 drone droneos
 ```
 
-**Parameters:**
-- `sdb` - SD card device (from `lsblk`)
-- `kernel8` - Kernel variant (kernel/kernel7l/kernel8 for different RPi models)
-- `drone` - Image type (drone or base)
-- `myuser` - Login username
-- `mypassword` - Login password
-- `MyWiFiSSID` - WiFi network name
-- `MyWiFiPassword` - WiFi password
-- `US` - WiFi country code
+Parameters:
 
-### 3. Boot and Test
+- `sdb` is the SD card device, with or without `/dev/`.
+- `kernel8` selects the 64-bit Raspberry Pi Alpine image.
+- `drone` selects `cmd/drone/main.go`; use `base` for `cmd/base/main.go`.
+- `droneos` is the Alpine hostname and local backup overlay name.
 
-Insert SD card into Raspberry Pi and power on. The drone will:
-1. Connect to WiFi (prints IP on console)
-2. Wait for commands from base station
+The image builder downloads an Alpine Raspberry Pi tarball, formats the SD card as Alpine boot media, and packages droneOS configuration into an Alpine local backup overlay. Production images also cross-compile and embed the selected droneOS binary.
 
-**Note:** Development mode has the droneOS service **disabled** by default - use `pi_runner.sh` for testing.
+## Image Options
+
+Production mode is the default and starts droneOS on boot:
+
+```bash
+bash build_image.sh sdb kernel8 drone droneos
+```
+
+Development mode builds the same Alpine media but skips compiling or embedding the application. It leaves the `droneOS` OpenRC service disabled and configures WiFi plus SSH access:
+
+```bash
+BUILD_MODE=dev bash build_image.sh sdb kernel8 drone droneos admin password MySSID MyPass US
+```
+
+The development arguments are hostname, SSH username, SSH password, WiFi SSID, WiFi password, and WiFi country. The old Ubuntu-style form is still accepted if you do not need a custom hostname:
+
+```bash
+BUILD_MODE=dev bash build_image.sh sdb kernel8 drone admin password MySSID MyPass US
+```
+
+For drone images, the Pi joins the configured WiFi network using `wpa_supplicant`. For base images, the Pi creates an access point at `10.42.0.1` using `hostapd` and `dnsmasq`. The image adds your host public SSH key to the dev user, generating `~/.ssh/id_ed25519` if no key exists, and installs `rsync` plus Go for source-based development.
+
+Sync the working tree to a development Pi over WiFi:
+
+```bash
+bash sync_pi.sh 192.168.1.42
+```
+
+By default this syncs to `/home/admin/droneOS`. Override the user, port, or destination with `DRONEOS_PI_USER`, `DRONEOS_PI_PORT`, and `DRONEOS_PI_DIR`.
+
+Useful overrides:
+
+```bash
+ALPINE_VERSION=3.20.3 bash build_image.sh sdb kernel8 drone droneos
+ALPINE_TARBALL=/tmp/alpine-rpi.tar.gz bash build_image.sh sdb kernel8 drone droneos
+ALPINE_ARCH=aarch64 bash build_image.sh sdb kernel8 drone droneos
+```
+
+The previous Debian package based PiSugar installer is not part of the Alpine image flow. I2C and SPI are enabled in the Raspberry Pi boot config so hardware drivers can access those buses directly.
 
 ## Development
 
-### Initial Setup
+### Local Runs
 
 ```bash
-# Clone repository
-git clone https://github.com/roryl23/droneOS.git
-cd droneOS
-
-# Install dependencies
-bash setup.sh
-
-# Configure your drone
-cp configs/config.yaml configs/my_drone.yaml
-# Edit configs/my_drone.yaml with your hardware setup
-```
-
-### Development Workflow
-
-#### Option 1: Live Development with pi_runner.sh (Recommended)
-
-The fastest way to iterate - automatically builds, deploys, and restarts the drone:
-
-```bash
-# Set your Pi's IP address
-export DRONEOS_PI_HOST=192.168.0.34  # Replace with your Pi's IP
-
-# Run development server (starts base station + deploys to Pi)
-bash pi_runner.sh ./configs/config.yaml
-
-# Or use custom config
-bash pi_runner.sh ./configs/my_drone.yaml
-
-# The script will:
-# 1. Start base station locally
-# 2. Cross-compile drone binary for ARM64
-# 3. SCP binary + config to Pi
-# 4. Restart droneOS service on Pi
-```
-
-**Environment Variables:**
-```bash
-DRONEOS_PI_HOST=192.168.0.34     # Pi IP address
-DRONEOS_PI_USER=root             # SSH user (default: root)
-DRONEOS_PI_PORT=22               # SSH port
-DRONEOS_PI_DIR=/opt/droneOS      # Install directory on Pi
-DRONEOS_PI_ARCH=arm64            # Target architecture
-```
-
-#### Option 2: Manual Testing
-
-```bash
-# Build drone binary
-GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc \
-  go build -o drone.bin ./cmd/drone/main.go
-
-# Copy to Pi
-scp drone.bin root@192.168.0.34:/opt/droneOS/
-scp configs/config.yaml root@192.168.0.34:/opt/droneOS/
-
-# SSH to Pi and run manually
-ssh root@192.168.0.34
-cd /opt/droneOS
-./drone.bin --config-file config.yaml
-```
-
-#### Option 3: Run Base Station Only
-
-```bash
-# For testing base station without drone
 go run ./cmd/base/main.go --config-file ./configs/config.yaml
+go run ./cmd/drone/main.go --config-file ./configs/config.yaml
 ```
 
-### Building SD Card Images
+Both the base and drone processes need to run to validate integration behavior locally.
 
-#### Development Image (Default)
-
-For active development with frequent updates:
+### Configuration
 
 ```bash
-bash build_image.sh sdb kernel8 drone admin password MySSID MyPass US
+cp configs/config.yaml configs/my_drone.yaml
 ```
 
-- droneOS service **disabled** (doesn't start on boot)
-- No OverlayFS (filesystem is writable)
-- Use `pi_runner.sh` for deployment
-- Logs written to disk
+Edit `configs/my_drone.yaml` for your hardware. The image builder currently copies `configs/config.yaml`; replace that file or update the script if you want to bake a different config into the SD card.
 
-#### Production Image
+### Hardware Console
 
-For deployed drones with filesystem protection:
+On an Alpine booted Pi with an attached console:
 
 ```bash
-BUILD_MODE=prod bash build_image.sh sdb kernel8 drone admin password MySSID MyPass US
+ssh admin@<pi-ip>
+rc-service droneOS status
+rc-service droneOS restart
+tail -f /var/log/droneOS.log
+tail -f /var/log/droneOS.err
 ```
 
-- droneOS service **enabled** (starts on boot)
-- OverlayFS **enabled** (read-only root, changes in RAM)
-- Volatile journald (logs in RAM only)
-- Requires `sudo overlayroot-chroot` for persistent changes
+## Project Layout
 
-#### Optional Features
+- Base station entrypoint: `cmd/base/main.go`
+- Drone entrypoint: `cmd/drone/main.go`
+- Shared config: `configs/config.yaml`
+- Protocol framing and transports: `internal/protocol/*`
+- Radio driver: `internal/drivers/radio/SX1262`
+- Sensor drivers: `internal/drivers/sensor/*`
+- Motor drivers: `internal/drivers/motor/*`
+- Control algorithms: `internal/drone/control/*`
 
-```bash
-# Install PiSugar power manager
-INSTALL_PISUGAR=1 bash build_image.sh ...
+## Driver Patterns
 
-# Combine options
-BUILD_MODE=prod INSTALL_PISUGAR=1 bash build_image.sh ...
-```
+- Driver `Main` functions are invoked through `utils.CallFunctionByName` with a `context.Context` as the first argument.
+- Radio drivers should implement `protocol.RadioLink` with `Send([]byte)` and `Receive() ([]byte, error)`, then call `protocol.ServeRadio`.
+- New drivers and controls should live in new package directories and be registered in the maps in `cmd/drone/main.go`.
 
-### Testing on Hardware
+## Logging
 
-#### View Logs
+Use zerolog (`github.com/rs/zerolog/log`):
 
-```bash
-# Live logs from running drone
-ssh root@192.168.0.34 'sudo journalctl -u droneOS.service -f'
+- `Info` and `Error` for human output
+- `Debug` for machine-readable logs
 
-# Filter specific log levels
-ssh root@192.168.0.34 'sudo journalctl -u droneOS.service -n 100' | jq 'select(.level == "error")'
+Logs emitted by the OpenRC service are written to `/var/log/droneOS.log` and `/var/log/droneOS.err` on the running Alpine system.
 
-# Debug logs (only sent when WiFi connected)
-ssh root@192.168.0.34 'sudo journalctl -u droneOS.service -n 100' | jq 'select(.level == "debug")'
-```
+## Notes
 
-#### Common Issues
-
-**Filesystem becomes read-only:**
-- Caused by excessive I/O or power issues
-- Fixed in recent commits with volatile journald and optimized polling
-- Check power supply voltage (should be 5V ±0.25V)
-
-**WiFi not connecting:**
-```bash
-ssh root@192.168.0.34
-nmcli device wifi list
-nmcli connection up ShowMeWhatYouGot  # Your SSID
-```
-
-**Service not starting:**
-```bash
-ssh root@192.168.0.34
-sudo systemctl status droneOS.service
-sudo journalctl -u droneOS.service -n 50
-```
-
-## Development
-
-### Directories
-
-* `internal/base`: base station operation
-* `internal/drone`: drone operation
-* `internal/gpio`: Raspberry Pi GPIO pin interface
-* `internal/input`: Input sensor interfaces
-* `internal/output`: Output interfaces
-* `internal/control`: Control algorithms compiled to shared libraries
-* `internal/protocol`: Communication protocol for base and drone
-
-### General development flow
-
-* A user defined control algorithm is created here: `internal/control/some_name/main.go`
-* Your algorithm needs to satisfy the following interfaces:
-  * Have a `Main` function with the following signature: 
-    `Main(c *config.Config, priority int, eCh *chan sensor.Event, pq *output.Queue)`
-
-Your algorithm fundamentally needs to do these things:
-  * Utilize input interfaces in `internal/input` to determine what actions need to be taken.
-  * Translate into actions that utilize output interfaces in `internal/output`, if necessary.
-
-If you write more than one control algorithm, such as the default examples of `obstacle_avoidance` and `pilot`,
-you'll need to define their priority using `controlAlgorithmPriority` in `configs/config.yaml`.
-
-### Pi dev deploy (USB/SSH)
-
-Use the GoLand run config `base + pi` or run this from the repo root:
-
-```
-DRONEOS_PI_HOST=192.168.7.2 go run ./cmd/dev/pi_runner/main.go --config-file ./configs/config.yaml
-```
-
-The tool starts the base station locally, cross-compiles the drone binary, copies the binary and config to the Pi,
-then runs the drone binary over SSH. Override defaults with environment variables:
-`DRONEOS_PI_HOST`, `DRONEOS_PI_USER`, `DRONEOS_PI_PORT`, `DRONEOS_PI_DIR`, `DRONEOS_PI_ARCH`, `DRONEOS_PI_GOARM`,
-`DRONEOS_PI_CC`, `DRONEOS_PI_BIN`, `DRONEOS_PI_OUT`.
-
-### Logging
-
-droneOS logs in a very specific format to allow the base station to know the whole state of the system.
-This is useful for debugging the drone offline.
-Keep in mind that the debug logging only works when the drone is in WiFi range of the base station.,
-in order to save on bandwidth constraints over radio.
-
-Log levels are important, and divide two categories of emitted output:
-* Human readable:
-  * Error
-  * Info
-* Machine readable:
-  * Debug
-
-Logs can be filtered with [jq](https://jqlang.github.io/jq/download): 
-
-`./droneOS.bin | jq '.[] | select(.level == "Debug")'`
-
-### Raspberry PI GPIO
-
-
-* 25 GPIO 
-* 8 ground 
-* 2 5V 
-* 2 3.3V 
-* 2 ID EEPROM
-
-
-| Pin | Name   | BCM GPIO | Function                   |
-|-----|--------|----------|----------------------------|
-| 1   | 3.3V   |          | Power                      |
-| 2   | 5V     |          | Power                      |
-| 3   | GPIO2  | GPIO2    | SDA1, I²C Data             |
-| 4   | 5V     |          | Power                      |
-| 5   | GPIO3  | GPIO3    | SCL1, I²C Clock            |
-| 6   | GND    |          | Ground                     |
-| 7   | GPIO4  | GPIO4    | GPCLK0                     |
-| 8   | GPIO14 | GPIO14   | UART0_TXD                  |
-| 9   | GND    |          | Ground                     |
-| 10  | GPIO15 | GPIO15   | UART0_RXD                  |
-| 11  | GPIO17 | GPIO17   | GPIO_GEN0                  |
-| 12  | GPIO18 | GPIO18   | PCM_CLK, PWM0              |
-| 13  | GPIO27 | GPIO27   | GPIO_GEN2                  |
-| 14  | GND    |          | Ground                     |
-| 15  | GPIO22 | GPIO22   | GPIO_GEN3                  |
-| 16  | GPIO23 | GPIO23   | GPIO_GEN4                  |
-| 17  | 3.3V   |          | Power                      |
-| 18  | GPIO24 | GPIO24   | GPIO_GEN5                  |
-| 19  | GPIO10 | GPIO10   | SPI0_MOSI                  |
-| 20  | GND    |          | Ground                     |
-| 21  | GPIO9  | GPIO9    | SPI0_MISO                  |
-| 22  | GPIO25 | GPIO25   | GPIO_GEN6                  |
-| 23  | GPIO11 | GPIO11   | SPI0_SCLK                  |
-| 24  | GPIO8  | GPIO8    | SPI0_CE0_N                 |
-| 25  | GND    |          | Ground                     |
-| 26  | GPIO7  | GPIO7    | SPI0_CE1_N                 |
-| 27  | ID_SD  | GPIO0    | I²C ID EEPROM Data (ID_SD) |
-| 28  | ID_SC  | GPIO1    | I²C ID EEPROM Clock (ID_SC)|
-| 29  | GPIO5  | GPIO5    | GPIO_GEN1                  |
-| 30  | GND    |          | Ground                     |
-| 31  | GPIO6  | GPIO6    | GPIO_GEN2                  |
-| 32  | GPIO12 | GPIO12   | PWM0                       |
-| 33  | GPIO13 | GPIO13   | PWM1                       |
-| 34  | GND    |          | Ground                     |
-| 35  | GPIO19 | GPIO19   | PCM_FS, PWM1               |
-| 36  | GPIO16 | GPIO16   | GPIO_GEN4                  |
-| 37  | GPIO26 | GPIO26   | GPIO_GEN7                  |
-| 38  | GPIO20 | GPIO20   | PCM_DIN                    |
-| 39  | GND    |          | Ground                     |
-| 40  | GPIO21 | GPIO21   | PCM_DOUT                   |
-
-#### Other detail
-
-* Power Pins: Pins 1 (3.3V), 2 (5V), 4 (5V), and 17 (3.3V) are power supply pins. 
-* Ground Pins: Pins 6, 9, 14, 20, 25, 30, 34, and 39 are ground pins. 
-* GPIO Pins: The GPIO (General Purpose Input/Output) pins can be programmed for various functions. 
-* Special Function Pins: Some GPIO pins have special functions like I²C, SPI, UART, and PWM.
-
-### Notes
-
-* Currently, we're patching the kernel during compilation from source.
-  Once the mainline kernel has the realtime patch, we can remove the kernel source patch and compilation:
-  * https://wiki.linuxfoundation.org/realtime/start
-
-#### Resources
-
-* Raspberry PI
-  * https://www.raspberrypi.com/documentation/computers/linux_kernel.html
-    * https://cdn.kernel.org/pub/linux/kernel/projects/rt/6.6/
-  * https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#raspberry-pi-zero-2-w
-  * https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#gpio-and-the-40-pin-header
-* Go libraries
-  * https://github.com/warthog618/go-gpiocdev
-  * https://gobot.io/documentation/drivers
-  * https://github.com/tinygo-org/drivers
-  * https://github.com/thinkski/go-v4l2
-
-#### Contributing
-
-Feel free to fork the PR and add plugins for your project.
+- `build.sh` no longer runs `go mod tidy`; dependency changes should be explicit.
+- `pi_runner.sh` and `cmd/dev/pi_runner` are not yet ported to Alpine/OpenRC remote deployment.
+- If you need a custom Raspberry Pi kernel, provide a custom Alpine Raspberry Pi tarball with that kernel already integrated.
