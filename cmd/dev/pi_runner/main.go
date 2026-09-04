@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/tarm/serial"
 )
 
@@ -46,24 +47,28 @@ type serialRunner struct {
 }
 
 func main() {
+	os.Exit(runCLI())
+}
+
+func runCLI() (exitCode int) {
 	opts, mode, err := parseFlags(os.Args[1:])
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		reportCLIError(err)
+		return 2
 	}
 
 	if mode == "list" {
 		if err := listDevices(os.Stdout); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			reportCLIError(err)
+			return 1
 		}
-		return
+		return 0
 	}
 
 	device, err := resolveDevice(opts.device)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		reportCLIError(err)
+		return 1
 	}
 
 	port, err := serial.OpenPort(&serial.Config{
@@ -72,40 +77,65 @@ func main() {
 		ReadTimeout: readTimeout,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "open serial device %s: %v\n", device, err)
-		os.Exit(1)
+		reportCLIError(fmt.Errorf("open serial device %s: %w", device, err))
+		return 1
 	}
-	defer port.Close()
+	defer func() {
+		if err := port.Close(); err != nil {
+			reportCLIError(fmt.Errorf("close serial device %s: %w", device, err))
+			if exitCode == 0 {
+				exitCode = 1
+			}
+		}
+	}()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	switch mode {
 	case "console":
-		fmt.Fprintf(os.Stderr, "serial console on %s at %d baud\n", device, opts.baud)
+		if err := writeFormatted(os.Stderr, "serial console on %s at %d baud\n", device, opts.baud); err != nil {
+			reportCLIError(fmt.Errorf("write console status: %w", err))
+			return 1
+		}
 		if err := runConsole(ctx, port, os.Stdin, os.Stdout); err != nil && !errors.Is(err, context.Canceled) {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			reportCLIError(err)
+			return 1
 		}
 	case "loopback":
 		if err := runLoopback(ctx, port, opts); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			reportCLIError(err)
+			return 1
 		}
 	case "wait":
 		if err := runWait(ctx, port, opts); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			reportCLIError(err)
+			return 1
 		}
 	case "exec":
 		if err := runExec(ctx, port, opts); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			reportCLIError(err)
+			return 1
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "unsupported mode %q\n", mode)
-		os.Exit(2)
+		reportCLIError(fmt.Errorf("unsupported mode %q", mode))
+		return 2
 	}
+	return 0
+}
+
+func reportCLIError(err error) {
+	if writeErr := writeFormatted(os.Stderr, "%v\n", err); writeErr != nil {
+		log.Error().
+			Err(writeErr).
+			Str("original_error", err.Error()).
+			Msg("failed to write CLI error")
+	}
+}
+
+func writeFormatted(w io.Writer, format string, args ...any) error {
+	_, err := fmt.Fprintf(w, format, args...)
+	return err
 }
 
 func parseFlags(args []string) (options, string, error) {
@@ -214,7 +244,9 @@ func listDevices(w io.Writer) error {
 		return errors.New("no serial devices found under /dev/serial/by-id, /dev/ttyUSB*, or /dev/ttyACM*")
 	}
 	for _, device := range devices {
-		fmt.Fprintln(w, device)
+		if err := writeFormatted(w, "%s\n", device); err != nil {
+			return fmt.Errorf("write serial device %q: %w", device, err)
+		}
 	}
 	return nil
 }
@@ -335,14 +367,16 @@ func runWait(ctx context.Context, port *serial.Port, opts options) error {
 		scratch: make([]byte, 1024),
 	}
 
-	stopPoke := runner.startPoke(timeoutCtx, opts.poke)
+	pokeCtx, stopPoke := runner.startPoke(timeoutCtx, opts.poke)
 	defer stopPoke()
 
-	_, err := runner.expect(timeoutCtx, opts.waitMarker)
+	_, err := runner.expect(pokeCtx, opts.waitMarker)
 	if err != nil {
 		return fmt.Errorf("wait for %q: %w", opts.waitMarker, err)
 	}
-	fmt.Fprintf(os.Stderr, "\nfound %q\n", opts.waitMarker)
+	if err := writeFormatted(os.Stderr, "\nfound %q\n", opts.waitMarker); err != nil {
+		return fmt.Errorf("write wait status: %w", err)
+	}
 	return nil
 }
 
@@ -362,7 +396,9 @@ func runLoopback(ctx context.Context, port *serial.Port, opts options) error {
 	if _, err := runner.expect(timeoutCtx, marker); err != nil {
 		return fmt.Errorf("loopback marker was not echoed; short adapter TX to RX and retry: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "\nserial loopback OK: %s\n", marker)
+	if err := writeFormatted(os.Stderr, "\nserial loopback OK: %s\n", marker); err != nil {
+		return fmt.Errorf("write loopback status: %w", err)
+	}
 	return nil
 }
 
@@ -404,9 +440,13 @@ func runExec(ctx context.Context, port *serial.Port, opts options) error {
 
 	cleaned := stripCommandEcho(output, command)
 	cleaned = stripAfterMarker(cleaned, marker)
-	fmt.Print(cleaned)
+	if err := writeFormatted(os.Stdout, "%s", cleaned); err != nil {
+		return fmt.Errorf("write command output: %w", err)
+	}
 	if len(cleaned) > 0 && !strings.HasSuffix(cleaned, "\n") {
-		fmt.Println()
+		if err := writeFormatted(os.Stdout, "\n"); err != nil {
+			return fmt.Errorf("terminate command output: %w", err)
+		}
 	}
 
 	if status != 0 {
@@ -416,7 +456,9 @@ func runExec(ctx context.Context, port *serial.Port, opts options) error {
 }
 
 func (r *serialRunner) login(ctx context.Context, user, password string) error {
-	_ = r.writeRaw("\r")
+	if err := r.writeRaw("\r"); err != nil {
+		return fmt.Errorf("wake login prompt: %w", err)
+	}
 	text, err := r.expect(ctx, "login:", "Password:", "$ ", "# ")
 	if err != nil {
 		return fmt.Errorf("wait for login prompt: %w", err)
@@ -479,13 +521,15 @@ func (r *serialRunner) waitExitStatus(ctx context.Context, marker string) (int, 
 
 		select {
 		case <-ctx.Done():
-			return 0, fmt.Errorf("read command exit status: %w", ctx.Err())
+			return 0, fmt.Errorf("read command exit status: %w", context.Cause(ctx))
 		default:
 		}
 
 		n, err := r.port.Read(r.scratch)
 		if n > 0 {
-			r.append(r.scratch[:n])
+			if appendErr := r.append(r.scratch[:n]); appendErr != nil {
+				return 0, appendErr
+			}
 		}
 		if err != nil && !errors.Is(err, io.EOF) {
 			return 0, err
@@ -504,13 +548,15 @@ func (r *serialRunner) expect(ctx context.Context, needles ...string) (string, e
 
 		select {
 		case <-ctx.Done():
-			return current, ctx.Err()
+			return current, context.Cause(ctx)
 		default:
 		}
 
 		n, err := r.port.Read(r.scratch)
 		if n > 0 {
-			r.append(r.scratch[:n])
+			if appendErr := r.append(r.scratch[:n]); appendErr != nil {
+				return current, appendErr
+			}
 		}
 		if err != nil && !errors.Is(err, io.EOF) {
 			return current, err
@@ -518,49 +564,85 @@ func (r *serialRunner) expect(ctx context.Context, needles ...string) (string, e
 	}
 }
 
-func (r *serialRunner) append(data []byte) {
+func (r *serialRunner) append(data []byte) error {
 	if r.mirror != nil {
-		_, _ = r.mirror.Write(data)
+		written, err := r.mirror.Write(data)
+		if err != nil {
+			return fmt.Errorf("mirror serial output: %w", err)
+		}
+		if written != len(data) {
+			return fmt.Errorf("mirror serial output: %w", io.ErrShortWrite)
+		}
 	}
-	_, _ = r.recent.Write(data)
+	written, err := r.recent.Write(data)
+	if err != nil {
+		return fmt.Errorf("buffer serial output: %w", err)
+	}
+	if written != len(data) {
+		return fmt.Errorf("buffer serial output: %w", io.ErrShortWrite)
+	}
 	if r.recent.Len() <= maxBuffer {
-		return
+		return nil
 	}
 	value := r.recent.Bytes()
 	keep := append([]byte(nil), value[len(value)-maxBuffer:]...)
 	r.recent.Reset()
-	_, _ = r.recent.Write(keep)
+	written, err = r.recent.Write(keep)
+	if err != nil {
+		return fmt.Errorf("trim serial output buffer: %w", err)
+	}
+	if written != len(keep) {
+		return fmt.Errorf("trim serial output buffer: %w", io.ErrShortWrite)
+	}
+	return nil
 }
 
 func (r *serialRunner) reset() {
 	r.recent.Reset()
 }
 
-func (r *serialRunner) startPoke(ctx context.Context, interval time.Duration) func() {
+func (r *serialRunner) startPoke(ctx context.Context, interval time.Duration) (context.Context, func()) {
 	if interval <= 0 {
-		return func() {}
+		return ctx, func() {}
 	}
 
-	pokeCtx, cancel := context.WithCancel(ctx)
+	pokeCtx, cancel := context.WithCancelCause(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		_ = r.writeRaw("\r")
+		poke := func() bool {
+			if err := r.writeRaw("\r"); err != nil {
+				cancel(fmt.Errorf("write serial wakeup: %w", err))
+				return false
+			}
+			return true
+		}
+
+		select {
+		case <-pokeCtx.Done():
+			return
+		default:
+		}
+		if !poke() {
+			return
+		}
 		for {
 			select {
 			case <-pokeCtx.Done():
 				return
 			case <-ticker.C:
-				_ = r.writeRaw("\r")
+				if !poke() {
+					return
+				}
 			}
 		}
 	}()
 
-	return func() {
-		cancel()
+	return pokeCtx, func() {
+		cancel(context.Canceled)
 		<-done
 	}
 }

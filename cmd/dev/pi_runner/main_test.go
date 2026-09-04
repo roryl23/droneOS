@@ -240,3 +240,71 @@ func TestWriteRawReportsShortWrite(t *testing.T) {
 		t.Fatalf("writeRaw() error = %v, want io.ErrShortWrite", err)
 	}
 }
+
+type oneReadPort struct {
+	data []byte
+}
+
+func (p *oneReadPort) Read(value []byte) (int, error) {
+	if len(p.data) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(value, p.data)
+	p.data = p.data[n:]
+	return n, nil
+}
+
+func (p *oneReadPort) Write(value []byte) (int, error) {
+	return len(value), nil
+}
+
+type errorWriter struct {
+	err error
+}
+
+func (w errorWriter) Write([]byte) (int, error) {
+	return 0, w.err
+}
+
+func TestExpectPropagatesMirrorError(t *testing.T) {
+	mirrorErr := errors.New("mirror failed")
+	runner := &serialRunner{
+		port:    &oneReadPort{data: []byte("login:")},
+		mirror:  errorWriter{err: mirrorErr},
+		scratch: make([]byte, 16),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if _, err := runner.expect(ctx, "login:"); !errors.Is(err, mirrorErr) {
+		t.Fatalf("expect() error = %v, want mirror error", err)
+	}
+}
+
+type writeErrorPort struct {
+	err error
+}
+
+func (p writeErrorPort) Read([]byte) (int, error) {
+	return 0, io.EOF
+}
+
+func (p writeErrorPort) Write([]byte) (int, error) {
+	return 0, p.err
+}
+
+func TestStartPokePropagatesWriteError(t *testing.T) {
+	writeErr := errors.New("write failed")
+	runner := &serialRunner{
+		port:    writeErrorPort{err: writeErr},
+		scratch: make([]byte, 16),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	pokeCtx, stop := runner.startPoke(ctx, time.Hour)
+	defer stop()
+	if _, err := runner.expect(pokeCtx, "never"); !errors.Is(err, writeErr) {
+		t.Fatalf("expect() error = %v, want poke write error", err)
+	}
+}
