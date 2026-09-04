@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if ! command -v apk >/dev/null 2>&1; then
-  echo "setup.sh now targets Alpine Linux hosts. Run this on Alpine or install the equivalent packages manually." >&2
+  echo "setup.sh targets Alpine Linux hosts. Run this on Alpine or install the equivalent packages manually." >&2
   exit 1
 fi
 
@@ -17,36 +18,25 @@ else
 fi
 
 # Host tools for static Go builds, Alpine Raspberry Pi media creation, and
-# optional Raspberry Pi kernel work.
+# source synchronization to a development Pi.
 "${SUDO[@]}" apk update
 "${SUDO[@]}" apk add --no-cache \
   bash \
-  bc \
-  bison \
-  build-base \
-  coreutils \
-  curl \
+  ca-certificates \
   dosfstools \
-  e2fsprogs \
-  flex \
-  git \
+  parted \
   go \
-  linux-headers \
-  make \
-  mtools \
-  ncurses-dev \
   openssh-client \
   openssh-keygen \
   openssl \
-  openssl-dev \
-  perl \
   rsync \
   tar \
-  util-linux \
-  wget \
-  xz
+  lsblk \
+  sfdisk \
+  util-linux-misc \
+  wget
 
-mkdir -p build/droneOS
+mkdir -p "${PROJECT_DIR}/build/droneOS"
 
 for group in dialout plugdev input gpio i2c spi video; do
   if grep -q "^${group}:" /etc/group; then

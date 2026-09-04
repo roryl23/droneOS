@@ -9,25 +9,32 @@ usage:
 
 examples:
   bash build_image.sh sdb kernel8 drone droneos
-  BUILD_MODE=dev bash build_image.sh /dev/sdb kernel8 drone droneos admin password MySSID MyPass US
-  BUILD_MODE=dev bash build_image.sh /dev/sdb kernel8 drone admin password MySSID MyPass US
+  BUILD_MODE=dev bash build_image.sh /dev/sdb kernel8 drone droneos admin password MySSID MyPass123 US
+  BUILD_MODE=dev bash build_image.sh /dev/sdb kernel8 drone admin password MySSID MyPass123 US
 
 environment:
   BUILD_MODE=prod|dev        prod enables droneOS on boot (default: prod)
                              dev leaves droneOS disabled and enables WiFi/SSH
   ALPINE_BRANCH=latest-stable
-  ALPINE_VERSION=3.20.3      optional exact Alpine version
+  ALPINE_VERSION=3.20.3      exact version; set ALPINE_BRANCH=v3.20 for this release
   ALPINE_TARBALL=/path/file  optional local alpine-rpi tarball
   ALPINE_TARBALL_URL=https://...
   ALPINE_ARCH=aarch64        optional override: aarch64, armv7, or armhf
+  APK_FETCH_CONTAINER_IMAGE=alpine:latest
+                             container image used to fetch dev APKs when host apk is unavailable
   IMAGE_HOSTNAME=droneos     hostname when using the old 8-argument form
   DEV_USER_NAME=admin        dev SSH user
   DEV_USER_PASSWORD=...      dev SSH user password
   WIFI_SSID=droneos          dev WiFi SSID
-  WIFI_PASSWORD=...          dev WiFi password
+  WIFI_PASSWORD=...          dev WPA passphrase, 8-63 characters
   WIFI_COUNTRY=US            regulatory country code
   DISABLE_WIFI=1             add Raspberry Pi disable-wifi overlay (default: prod=1, dev=0)
   DISABLE_BLUETOOTH=1        add Raspberry Pi disable-bt overlay (default: 1)
+  ENABLE_UART_CONSOLE=1      add serial console (default: prod=0, dev=1)
+  UART_CONSOLE_TTY=ttyAMA0   serial console device for GPIO14/GPIO15 UART
+  UART_CONSOLE_EXTRA_TTYS=ttyS0
+                             extra serial console TTYs (default: dev=ttyS0, prod empty)
+  UART_CONSOLE_BAUD=115200   serial console baud rate
 EOF
 }
 
@@ -75,6 +82,26 @@ append_cmdline_arg() {
   if ! grep -Eq "(^|[[:space:]])${key}=" "$file"; then
     "${SUDO[@]}" sed -i "1s|$| ${arg}|" "$file"
   fi
+}
+
+append_cmdline_token_once() {
+  local file=$1
+  local token=$2
+  local content
+
+  [[ -f "$file" ]] || return 0
+  content=$(<"$file")
+  if [[ " $content " != *" $token "* ]]; then
+    "${SUDO[@]}" sed -i "1s|$| ${token}|" "$file"
+  fi
+}
+
+remove_cmdline_token() {
+  local file=$1
+  local token=$2
+
+  [[ -f "$file" ]] || return 0
+  "${SUDO[@]}" sed -i -E "s/(^|[[:space:]])${token}([[:space:]]|$)/ /g; s/^[[:space:]]+//; s/[[:space:]]+$//; s/[[:space:]]+/ /g" "$file"
 }
 
 quote_sh() {
@@ -163,6 +190,8 @@ fetch_dev_apks() {
   local main_repo="${ALPINE_MIRROR}/${ALPINE_BRANCH}/main"
   local community_repo="${ALPINE_MIRROR}/${ALPINE_BRANCH}/community"
   local packages=(openssh rsync go iw wireless-regdb)
+  local container_image="${APK_FETCH_CONTAINER_IMAGE:-alpine:latest}"
+  local container_apk_script
 
   if [[ "$TYPE" == "base" ]]; then
     packages+=(hostapd dnsmasq)
@@ -170,15 +199,64 @@ fetch_dev_apks() {
     packages+=(wpa_supplicant)
   fi
 
+  # shellcheck disable=SC2016
+  container_apk_script='
+set -e
+printf "%s\n%s\n" "$1" "$2" > /etc/apk/repositories
+shift 2
+arch=$1
+shift
+apk --allow-untrusted --arch "$arch" update
+apk --allow-untrusted --arch "$arch" fetch --recursive --output /out "$@"
+'
+
   mkdir -p "$DEV_APK_CACHE_DIR"
   echo "fetching Alpine dev packages for ${ALPINE_ARCH}: ${packages[*]}..."
-  apk fetch \
-    --recursive \
-    --arch "$ALPINE_ARCH" \
-    --repository "$main_repo" \
-    --repository "$community_repo" \
-    --output "$DEV_APK_CACHE_DIR" \
-    "${packages[@]}"
+  if command -v apk >/dev/null 2>&1; then
+    if apk fetch \
+      --update-cache \
+      --recursive \
+      --arch "$ALPINE_ARCH" \
+      --repository "$main_repo" \
+      --repository "$community_repo" \
+      --output "$DEV_APK_CACHE_DIR" \
+      "${packages[@]}" && compgen -G "${DEV_APK_CACHE_DIR}/*.apk" >/dev/null; then
+      return
+    fi
+    echo "host apk fetch failed; trying a container fallback if available..." >&2
+  fi
+
+  if command -v docker >/dev/null 2>&1; then
+    if "${SUDO[@]}" docker run --rm \
+      -v "${DEV_APK_CACHE_DIR}:/out" \
+      "$container_image" \
+      sh -c "$container_apk_script" \
+      sh \
+      "$main_repo" \
+      "$community_repo" \
+      "$ALPINE_ARCH" \
+      "${packages[@]}" && compgen -G "${DEV_APK_CACHE_DIR}/*.apk" >/dev/null; then
+      return
+    fi
+    echo "docker apk fetch failed; trying podman if available..." >&2
+  fi
+
+  if command -v podman >/dev/null 2>&1; then
+    if podman run --rm \
+      -v "${DEV_APK_CACHE_DIR}:/out" \
+      "$container_image" \
+      sh -c "$container_apk_script" \
+      sh \
+      "$main_repo" \
+      "$community_repo" \
+      "$ALPINE_ARCH" \
+      "${packages[@]}" && compgen -G "${DEV_APK_CACHE_DIR}/*.apk" >/dev/null; then
+      return
+    fi
+  fi
+
+  echo "could not fetch Alpine dev APKs; install apk-tools or install a working docker/podman setup" >&2
+  exit 1
 }
 
 unmount_existing_partitions() {
@@ -209,6 +287,10 @@ create_dev_access_overlay() {
   write_shell_var "$dev_env" DEV_WIFI_MODE "$([[ "$TYPE" == "base" ]] && printf ap || printf client)"
   write_shell_var "$dev_env" DEV_STATIC_IP "10.42.0.1"
   write_shell_var "$dev_env" DEV_PROJECT_DIR "$DEV_PROJECT_DIR"
+  write_shell_var "$dev_env" ENABLE_UART_CONSOLE "$ENABLE_UART_CONSOLE"
+  write_shell_var "$dev_env" UART_CONSOLE_TTY "$UART_CONSOLE_TTY"
+  write_shell_var "$dev_env" UART_CONSOLE_EXTRA_TTYS "$UART_CONSOLE_EXTRA_TTYS"
+  write_shell_var "$dev_env" UART_CONSOLE_BAUD "$UART_CONSOLE_BAUD"
   chmod 0600 "$dev_env"
 
   printf '%s\n' "$HOST_SSH_KEY" > "$staging/etc/droneos/authorized_keys"
@@ -247,13 +329,13 @@ EOF
     cat > "$staging/etc/hostapd/hostapd.conf" <<EOF
 interface=wlan0
 driver=nl80211
-ssid=${escaped_ssid}
+ssid=${WIFI_SSID}
 hw_mode=g
 channel=6
 wmm_enabled=1
 auth_algs=1
 wpa=2
-wpa_passphrase=${escaped_password}
+wpa_passphrase=${WIFI_PASSWORD}
 wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
 country_code=${WIFI_COUNTRY}
@@ -399,9 +481,37 @@ print_dev_ip() {
     echo "droneOS dev SSH: ${DEV_USER_NAME}@${ip:-unknown}" | tee /dev/tty1 >/dev/null 2>&1 || true
 }
 
+configure_uart_getty() {
+    local tty="$1"
+    local baud="$2"
+
+    [ -n "$tty" ] || return 1
+    [ -c "/dev/${tty}" ] || return 1
+
+    if ! grep -q "^${tty}::respawn:" /etc/inittab 2>/dev/null; then
+        printf '%s::respawn:/sbin/getty -L %s %s vt100\n' "$tty" "$baud" "$tty" >> /etc/inittab
+        kill -HUP 1 >/dev/null 2>&1 || true
+    fi
+    printf 'droneOS UART console ready on %s at %s baud\n' "$tty" "$baud" >"/dev/${tty}" 2>/dev/null || true
+    return 0
+}
+
+configure_uart_console() {
+    local baud="${UART_CONSOLE_BAUD:-115200}"
+    local tty
+
+    for tty in ${UART_CONSOLE_TTY:-ttyAMA0} ${UART_CONSOLE_EXTRA_TTYS:-}; do
+        configure_uart_getty "$tty" "$baud" || true
+    done
+    return 0
+}
+
 start() {
     . /etc/droneos/dev.env
     ebegin "Configuring droneOS development access"
+    if [ "${ENABLE_UART_CONSOLE:-0}" -eq 1 ]; then
+        configure_uart_console
+    fi
     install_dev_packages || return 1
     restore_dev_configs || return 1
     configure_dev_user || return 1
@@ -519,6 +629,13 @@ write_boot_config() {
 
   append_cmdline_arg "$cmdline_txt" "alpine_dev=LABEL=ALPINE"
   append_cmdline_arg "$cmdline_txt" "apkovl=${HOSTNAME}.apkovl.tar.gz"
+  if [[ "$ENABLE_UART_CONSOLE" -eq 1 ]]; then
+    remove_cmdline_token "$cmdline_txt" "quiet"
+    append_cmdline_token_once "$cmdline_txt" "console=${UART_CONSOLE_TTY},${UART_CONSOLE_BAUD}"
+    for tty in $UART_CONSOLE_EXTRA_TTYS; do
+      append_cmdline_token_once "$cmdline_txt" "console=${tty},${UART_CONSOLE_BAUD}"
+    done
+  fi
 }
 
 cleanup_on_exit() {
@@ -575,6 +692,7 @@ else
   WIFI_PASSWORD=${8:-$DEFAULT_WIFI_PASSWORD}
   WIFI_COUNTRY=${9:-$DEFAULT_WIFI_COUNTRY}
 fi
+WIFI_COUNTRY=${WIFI_COUNTRY^^}
 
 DEV_PROJECT_DIR=${DEV_PROJECT_DIR:-"/home/${DEV_USER_NAME}/droneOS"}
 
@@ -614,7 +732,7 @@ else
   require_command sudo
 fi
 
-for cmd in basename cp grep install lsblk mkdir mount mountpoint sed sort tail tar umount wget; do
+for cmd in basename cp find grep install lsblk mkdir mount mountpoint sed sort tail tar umount wget; do
   require_command "$cmd"
 done
 for cmd in mkfs.vfat partprobe sfdisk sync; do
@@ -635,6 +753,22 @@ if [[ -z "${DISABLE_WIFI+x}" ]]; then
   fi
 fi
 DISABLE_BLUETOOTH=${DISABLE_BLUETOOTH:-1}
+if [[ -z "${ENABLE_UART_CONSOLE+x}" ]]; then
+  if [[ "$BUILD_MODE" == "dev" ]]; then
+    ENABLE_UART_CONSOLE=1
+  else
+    ENABLE_UART_CONSOLE=0
+  fi
+fi
+UART_CONSOLE_TTY=${UART_CONSOLE_TTY:-ttyAMA0}
+if [[ -z "${UART_CONSOLE_EXTRA_TTYS+x}" ]]; then
+  if [[ "$BUILD_MODE" == "dev" && "$ENABLE_UART_CONSOLE" -eq 1 ]]; then
+    UART_CONSOLE_EXTRA_TTYS=ttyS0
+  else
+    UART_CONSOLE_EXTRA_TTYS=""
+  fi
+fi
+UART_CONSOLE_BAUD=${UART_CONSOLE_BAUD:-115200}
 SKIP_KERNEL_BUILD=${SKIP_KERNEL_BUILD:-1}
 INSTALL_PISUGAR=${INSTALL_PISUGAR:-0}
 
@@ -696,12 +830,40 @@ fi
 
 resolve_alpine_tarball
 
+if [[ "$ENABLE_UART_CONSOLE" -eq 1 ]]; then
+  if ! [[ "$UART_CONSOLE_TTY" =~ ^tty[A-Za-z0-9_]+$ ]]; then
+    echo "invalid UART_CONSOLE_TTY: ${UART_CONSOLE_TTY}" >&2
+    exit 1
+  fi
+  for tty in $UART_CONSOLE_EXTRA_TTYS; do
+    if ! [[ "$tty" =~ ^tty[A-Za-z0-9_]+$ ]]; then
+      echo "invalid UART_CONSOLE_EXTRA_TTYS entry: ${tty}" >&2
+      exit 1
+    fi
+  done
+  if ! [[ "$UART_CONSOLE_BAUD" =~ ^[0-9]+$ ]]; then
+    echo "invalid UART_CONSOLE_BAUD: ${UART_CONSOLE_BAUD}" >&2
+    exit 1
+  fi
+fi
+
 if [[ "$ENABLE_DEV_ACCESS" -eq 1 ]]; then
-  require_command apk
   require_command openssl
   require_command ssh-keygen
   if ! [[ "$DEV_USER_NAME" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
     echo "invalid dev username: ${DEV_USER_NAME}" >&2
+    exit 1
+  fi
+  if ! [[ "$WIFI_COUNTRY" =~ ^[A-Z]{2}$ ]]; then
+    echo "invalid WiFi country: ${WIFI_COUNTRY} (use a two-letter country code like US)" >&2
+    exit 1
+  fi
+  if [[ "$WIFI_SSID" == *$'\r'* || "$WIFI_SSID" == *$'\n'* || "$WIFI_PASSWORD" == *$'\r'* || "$WIFI_PASSWORD" == *$'\n'* ]]; then
+    echo "WiFi SSID and password must not contain carriage returns or newlines" >&2
+    exit 1
+  fi
+  if (( ${#WIFI_PASSWORD} < 8 || ${#WIFI_PASSWORD} > 63 )); then
+    echo "WiFi password must contain 8 to 63 characters" >&2
     exit 1
   fi
   find_host_ssh_key
@@ -749,7 +911,12 @@ echo "extracting ${ALPINE_IMAGE_FILE}..."
 if [[ "$ENABLE_DEV_ACCESS" -eq 1 ]]; then
   echo "installing local Alpine dev APK cache..."
   "${SUDO[@]}" mkdir -p "${SD_CARD_BOOT_DIR}/droneos-apks/${ALPINE_ARCH}"
-  "${SUDO[@]}" cp "${DEV_APK_CACHE_DIR}"/*.apk "${SD_CARD_BOOT_DIR}/droneos-apks/${ALPINE_ARCH}/"
+  mapfile -t DEV_APK_FILES < <(find "$DEV_APK_CACHE_DIR" -maxdepth 1 -type f -name '*.apk' | sort)
+  if [[ "${#DEV_APK_FILES[@]}" -eq 0 ]]; then
+    echo "no Alpine dev APKs found in ${DEV_APK_CACHE_DIR}" >&2
+    exit 1
+  fi
+  "${SUDO[@]}" cp "${DEV_APK_FILES[@]}" "${SD_CARD_BOOT_DIR}/droneos-apks/${ALPINE_ARCH}/"
 fi
 
 echo "installing droneOS Alpine overlay..."

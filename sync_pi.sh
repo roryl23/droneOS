@@ -69,7 +69,10 @@ if [[ "$RSYNC_DELETE" == "1" || "$RSYNC_DELETE" == "true" ]]; then
   rsync_args+=(--delete)
 fi
 
-ssh "${ssh_args[@]}" "$remote" "mkdir -p $(quote_sh "$PI_DIR")"
+remote_mkdir_command="mkdir -p $(quote_sh "$PI_DIR")"
+# The remote command is intentionally constructed and shell-quoted locally.
+# shellcheck disable=SC2029
+ssh "${ssh_args[@]}" "$remote" "$remote_mkdir_command"
 rsync "${rsync_args[@]}" -e "$rsync_ssh" "${PROJECT_DIR}/" "${remote}:${PI_DIR}/"
 
 echo "synced ${PROJECT_DIR} to ${remote}:${PI_DIR}"
