@@ -162,7 +162,7 @@ Local Go tests cover WiFi transport behavior and the UART runner's transient-EOF
 
 - Keep changes small and tied to the runtime layer that owns the behavior.
 - Prefer adding drivers/controls in new package directories, then registering them in the exact entrypoint maps that call them.
-- Update `configs/config.yaml`, `README.md`, and this file when a change modifies a config field, runtime contract, build workflow, or deployment workflow.
+- Agents MUST update `README.md` in the same change, without waiting for a separate request or confirmation, whenever user-facing commands, setup, configuration/environment behavior, runtime contracts, architecture, supported hardware or status, dependencies, build/deploy behavior, safety caveats, or verification workflows change. Internal-only refactors MUST trigger a README accuracy check but MUST NOT cause churn when its user-facing claims remain correct.
 - Avoid hiding durable behavior in ad hoc shell flags when it belongs in `configs/config.yaml` or a documented image-builder environment variable.
 - Preserve existing generated/build outputs in `build/` as ignored artifacts; do not commit binaries or SD-card images.
 - Do not rewrite unrelated IDE or editor metadata while doing code work.
