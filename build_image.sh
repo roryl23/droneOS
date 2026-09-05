@@ -198,7 +198,7 @@ resolve_alpine_tarball() {
 fetch_dev_apks() {
   local main_repo="${ALPINE_MIRROR}/${ALPINE_BRANCH}/main"
   local community_repo="${ALPINE_MIRROR}/${ALPINE_BRANCH}/community"
-  local packages=(openssh rsync go iw wireless-regdb)
+  local packages=(openssl openssh rsync go iw wireless-regdb)
   local container_image="${APK_FETCH_CONTAINER_IMAGE:-alpine:latest}"
   local container_apk_script
 
@@ -220,6 +220,7 @@ apk --allow-untrusted --arch "$arch" fetch --recursive --output /out "$@"
 '
 
   mkdir -p "$DEV_APK_CACHE_DIR"
+  rm -f "$DEV_APK_CACHE_DIR"/*.apk
   echo "fetching Alpine dev packages for ${ALPINE_ARCH}: ${packages[*]}..."
   if command -v apk >/dev/null 2>&1; then
     if apk fetch \
@@ -412,7 +413,8 @@ install_dev_packages() {
         [ -d "$dir" ] || continue
         set -- "$dir"/*.apk
         [ -e "$1" ] || continue
-        apk add --no-network --allow-untrusted "$@" || apk add --allow-untrusted "$@"
+        apk add --no-network --allow-untrusted --force-non-repository --upgrade "$@" ||
+            apk add --allow-untrusted --force-non-repository --upgrade "$@"
         return $?
     done
     eerror "could not find droneOS dev APK cache"
@@ -521,9 +523,9 @@ start() {
     if [ "${ENABLE_UART_CONSOLE:-0}" -eq 1 ]; then
         configure_uart_console
     fi
+    configure_dev_user || return 1
     install_dev_packages || return 1
     restore_dev_configs || return 1
-    configure_dev_user || return 1
     start_dev_network
     start_dev_ssh
     print_dev_ip
@@ -640,7 +642,6 @@ write_boot_config() {
   fi
 
   append_cmdline_arg "$cmdline_txt" "alpine_dev=LABEL=ALPINE"
-  append_cmdline_arg "$cmdline_txt" "apkovl=${HOSTNAME}.apkovl.tar.gz"
   if [[ "$ENABLE_UART_CONSOLE" -eq 1 ]]; then
     remove_cmdline_token "$cmdline_txt" "quiet"
     append_cmdline_token_once "$cmdline_txt" "console=${UART_CONSOLE_TTY},${UART_CONSOLE_BAUD}"

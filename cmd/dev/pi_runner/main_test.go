@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -103,6 +104,19 @@ func TestRunConsoleSurvivesInputAndSerialEOF(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("console did not stop after context cancellation")
+	}
+}
+
+func TestCopyRawConsoleInputForwardsTerminalResponseAndStopsOnInterrupt(t *testing.T) {
+	const cursorPosition = "\x1b[31;11R"
+	var output bytes.Buffer
+
+	err := copyRawConsoleInput(&output, strings.NewReader(cursorPosition+"\x03ignored"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("copyRawConsoleInput() error = %v, want context.Canceled", err)
+	}
+	if got := output.String(); got != cursorPosition {
+		t.Fatalf("copyRawConsoleInput() output = %q, want %q", got, cursorPosition)
 	}
 }
 

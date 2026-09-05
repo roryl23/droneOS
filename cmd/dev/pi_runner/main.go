@@ -18,6 +18,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 	"github.com/tarm/serial"
+	"golang.org/x/term"
 )
 
 const (
@@ -314,7 +315,17 @@ func serialCandidatesAt(devRoot string) []string {
 	return candidates
 }
 
-func runConsole(ctx context.Context, port io.ReadWriter, input io.Reader, output io.Writer) error {
+func runConsole(ctx context.Context, port io.ReadWriter, input io.Reader, output io.Writer) (err error) {
+	restoreInput, rawInput, err := makeConsoleInputRaw(input)
+	if err != nil {
+		return fmt.Errorf("configure console terminal: %w", err)
+	}
+	defer func() {
+		if restoreErr := restoreInput(); err == nil && restoreErr != nil {
+			err = fmt.Errorf("restore console terminal: %w", restoreErr)
+		}
+	}()
+
 	errCh := make(chan error, 2)
 	go func() {
 		buf := make([]byte, 1024)
@@ -343,9 +354,13 @@ func runConsole(ctx context.Context, port io.ReadWriter, input io.Reader, output
 		}
 	}()
 	go func() {
-		_, err := io.Copy(port, input)
-		if err != nil {
-			errCh <- err
+		if rawInput {
+			errCh <- copyRawConsoleInput(port, input)
+			return
+		}
+		_, copyErr := io.Copy(port, input)
+		if copyErr != nil {
+			errCh <- copyErr
 		}
 	}()
 
@@ -354,6 +369,48 @@ func runConsole(ctx context.Context, port io.ReadWriter, input io.Reader, output
 		return ctx.Err()
 	case err := <-errCh:
 		return err
+	}
+}
+
+func makeConsoleInputRaw(input io.Reader) (restore func() error, raw bool, err error) {
+	file, ok := input.(*os.File)
+	if !ok {
+		return func() error { return nil }, false, nil
+	}
+	fd := int(file.Fd())
+	if !term.IsTerminal(fd) {
+		return func() error { return nil }, false, nil
+	}
+	state, err := term.MakeRaw(fd)
+	if err != nil {
+		return nil, false, err
+	}
+	return func() error { return term.Restore(fd, state) }, true, nil
+}
+
+func copyRawConsoleInput(output io.Writer, input io.Reader) error {
+	buf := make([]byte, 1024)
+	for {
+		n, readErr := input.Read(buf)
+		if n > 0 {
+			data := buf[:n]
+			if interrupt := bytes.IndexByte(data, 0x03); interrupt >= 0 {
+				data = data[:interrupt]
+				readErr = context.Canceled
+			}
+			if len(data) > 0 {
+				written, writeErr := output.Write(data)
+				if writeErr != nil {
+					return writeErr
+				}
+				if written != len(data) {
+					return io.ErrShortWrite
+				}
+			}
+		}
+		if readErr != nil {
+			return readErr
+		}
 	}
 }
 
