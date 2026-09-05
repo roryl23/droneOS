@@ -139,6 +139,7 @@ This repository is a Go codebase for two cooperating runtimes: a base station an
 - `SKIP_KERNEL_BUILD` must remain `1`; custom Raspberry Pi kernel builds are not part of the current Alpine diskless image flow.
 - For dev Pis, use `sync_pi.sh <host> [remote-dir]`; override with `DRONEOS_PI_USER`, `DRONEOS_PI_PORT`, `DRONEOS_PI_DIR`, and `DRONEOS_RSYNC_DELETE`.
 - `pi_runner.sh` supports `list`, `console`, `loopback`, `wait`, and `exec`. Automatic discovery sorts `/dev/serial/by-id` before `/dev/ttyUSB*` and `/dev/ttyACM*`, resolves and deduplicates aliases by device target, and keeps the stable by-id name as the canonical candidate. One canonical candidate is selected automatically; distinct devices require `--serial` or `DRONEOS_SERIAL_DEVICE`.
+- Interactive `pi_runner.sh console` places terminal stdin in raw mode, transparently forwards terminal replies such as ANSI cursor-position reports, restores the workstation terminal on every exit path, and keeps `Ctrl-C` as the local exit command. Piped and other non-TTY input remains unchanged.
 - `pi_runner.sh loopback` writes a marker and waits for it to echo back; use it with the adapter TX and RX pins temporarily shorted to prove host-side serial input/output before debugging Pi wiring.
 - `pi_runner.sh wait` defaults to 115200 baud and sends carriage returns every two seconds to rediscover a getty prompt; override with `DRONEOS_SERIAL_BAUD`, `DRONEOS_SERIAL_POKE_INTERVAL`, and `DRONEOS_SERIAL_TIMEOUT`.
 - `pi_runner.sh exec` logs in through the serial getty with `DRONEOS_PI_USER` and `DRONEOS_PI_PASSWORD`, then runs a shell command. It proves serial input/output and is the automation hook for agent-driven Pi checks when SSH is unavailable.
@@ -155,7 +156,7 @@ Run focused checks for the files you touch. Useful commands:
 - `shellcheck build.sh setup.sh sync_pi.sh pi_runner.sh build_image.sh` if `shellcheck` is installed
 - `git diff --check`
 
-Local Go tests cover WiFi transport behavior and the UART runner's transient-EOF console handling, mode-specific flag rejection, short-write reporting, and canonical by-id alias selection. `TestSerialCandidatesPreferStableByIDAlias` verifies that sorted by-id aliases resolving to one device collapse to the first stable alias and that distinct devices require explicit selection. They do not validate configured sensor/motor reflection signatures, real GPIO, LoRa hardware, OpenRC behavior, Alpine boot media, or controller hardware.
+Local Go tests cover WiFi transport behavior and the UART runner's transient-EOF handling, raw-console cursor-position forwarding and interrupt behavior, mode-specific flag rejection, short-write reporting, and canonical by-id alias selection. `TestSerialCandidatesPreferStableByIDAlias` verifies that sorted by-id aliases resolving to one device collapse to the first stable alias and that distinct devices require explicit selection. They do not validate configured sensor/motor reflection signatures, real GPIO, LoRa hardware, OpenRC behavior, Alpine boot media, or controller hardware.
 
 ## Contribution Guidelines
 
