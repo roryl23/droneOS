@@ -3,6 +3,7 @@ module droneOS
 go 1.23.0
 
 require (
+	github.com/joho/godotenv v1.5.1
 	github.com/roryl23/xpad-go v0.0.0-20260215173830-218c27de6a28
 	github.com/rs/zerolog v1.34.0
 	github.com/tarm/serial v0.0.0-20180830185346-98f6abe2eb07

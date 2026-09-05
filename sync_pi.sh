@@ -63,6 +63,8 @@ rsync_args=(
   --exclude .idea/
   --exclude build/
   --exclude '*.bin'
+  --exclude .image.env
+  --exclude .base.env
 )
 
 if [[ "$RSYNC_DELETE" == "1" || "$RSYNC_DELETE" == "true" ]]; then

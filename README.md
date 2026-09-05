@@ -146,6 +146,22 @@ ENABLE_UART_CONSOLE=1 UART_CONSOLE_TTY=ttyAMA0 UART_CONSOLE_EXTRA_TTYS= UART_CON
 
 The previous Debian package based PiSugar installer is not part of the Alpine image flow. I2C and SPI are enabled in the Raspberry Pi boot config so hardware drivers can access those buses directly.
 
+## Local Environment Files
+
+The optional, local role files are ignored by Git because they may contain credentials or other secrets. Start from the tracked, non-secret examples:
+
+```bash
+cp .image.env.example .image.env
+cp .base.env.example .base.env
+cp .drone.env.example .drone.env
+```
+
+`build_image.sh` looks for `.image.env` beside the script at the project root. It uses shell syntax and loads that file before resolving its environment-backed defaults, so values in the file govern the image variables and are exported to its child commands. Its supported keys are `BUILD_MODE`, `IMAGE_HOSTNAME`, `DEV_USER_NAME`, `DEV_USER_PASSWORD`, `WIFI_SSID`, `WIFI_PASSWORD`, `WIFI_COUNTRY`, `DEV_PROJECT_DIR`, `BUILD_DIR`, `ALPINE_MIRROR`, `ALPINE_BRANCH`, `ALPINE_ARCH`, `ALPINE_VERSION`, `ALPINE_TARBALL`, `ALPINE_TARBALL_URL`, `ALPINE_CACHE_DIR`, `APK_FETCH_CONTAINER_IMAGE`, `DISABLE_WIFI`, `DISABLE_BLUETOOTH`, `ENABLE_UART_CONSOLE`, `UART_CONSOLE_TTY`, `UART_CONSOLE_EXTRA_TTYS`, `UART_CONSOLE_BAUD`, `SKIP_KERNEL_BUILD`, `INSTALL_PISUGAR`, `GOARM`, and `MOUNT_BASE`. Command-line positional arguments for the hostname, development credentials, and WiFi settings retain precedence over `.image.env`.
+
+The base and drone programs look for `.base.env` and `.drone.env`, respectively, in their current working directory before parsing flags. Both support `DRONEOS_CONFIG_FILE` as the environment default for `--config-file`; an explicit `--config-file` flag wins. Drone also supports `DRONEOS_DISABLE_GC=1` or `true` to disable garbage collection. Values already present in the process environment take precedence over values from a Go-loaded role file. A malformed present role file stops startup with a clear error; a missing role file is optional.
+
+Production image builds include the selected role file—`.base.env` for a base image or `.drone.env` for a drone image—at `/opt/droneOS`. Development source sync transfers `.drone.env` when present but excludes `.image.env` and `.base.env`; copy the appropriate example on the target when another role needs its own local settings.
+
 ## Development
 
 ### Local Runs

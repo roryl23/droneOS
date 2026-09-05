@@ -1,6 +1,10 @@
 .idea/**
 # .vscode/
 
+.image.env
+.base.env
+.drone.env
+
 __debug_*
 
 *.img*

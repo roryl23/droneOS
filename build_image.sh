@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
+PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+IMAGE_ENV_FILE="${PROJECT_DIR}/.image.env"
+if [[ -e "$IMAGE_ENV_FILE" || -L "$IMAGE_ENV_FILE" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$IMAGE_ENV_FILE"
+  set +a
+fi
+
 
 usage() {
   cat >&2 <<'EOF'
@@ -552,6 +561,9 @@ create_openrc_overlay() {
   if [[ "$ENABLE_DRONEOS_SERVICE" -eq 1 ]]; then
     install -m 0755 "$BINARY_PATH" "$staging/opt/droneOS/${binary_name}"
     install -m 0644 "$PROJECT_DIR/configs/config.yaml" "$staging/opt/droneOS/config.yaml"
+    if [[ -e "${PROJECT_DIR}/.${TYPE}.env" || -L "${PROJECT_DIR}/.${TYPE}.env" ]]; then
+      install -m 0600 "${PROJECT_DIR}/.${TYPE}.env" "$staging/opt/droneOS/.${TYPE}.env"
+    fi
     SERVICE_DIRECTORY="/opt/droneOS"
     SERVICE_COMMAND="/opt/droneOS/${binary_name}"
     SERVICE_ARGS="--config-file /opt/droneOS/config.yaml"
@@ -739,7 +751,6 @@ for cmd in mkfs.vfat partprobe sfdisk sync; do
   require_command "$cmd"
 done
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR=${BUILD_DIR:-"${PROJECT_DIR}/build"}
 ALPINE_MIRROR=${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
 ALPINE_BRANCH=${ALPINE_BRANCH:-latest-stable}

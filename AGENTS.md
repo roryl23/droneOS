@@ -49,6 +49,11 @@ This repository is a Go codebase for two cooperating runtimes: a base station an
 
 ## Config Contracts
 
+- Optional role environment files are local and may contain secrets:
+  - `build_image.sh` loads project-root `.image.env` as shell syntax before resolving its environment-backed defaults. It supports `BUILD_MODE`, `IMAGE_HOSTNAME`, `DEV_USER_NAME`, `DEV_USER_PASSWORD`, `WIFI_SSID`, `WIFI_PASSWORD`, `WIFI_COUNTRY`, `DEV_PROJECT_DIR`, `BUILD_DIR`, `ALPINE_MIRROR`, `ALPINE_BRANCH`, `ALPINE_ARCH`, `ALPINE_VERSION`, `ALPINE_TARBALL`, `ALPINE_TARBALL_URL`, `ALPINE_CACHE_DIR`, `APK_FETCH_CONTAINER_IMAGE`, `DISABLE_WIFI`, `DISABLE_BLUETOOTH`, `ENABLE_UART_CONSOLE`, `UART_CONSOLE_TTY`, `UART_CONSOLE_EXTRA_TTYS`, `UART_CONSOLE_BAUD`, `SKIP_KERNEL_BUILD`, `INSTALL_PISUGAR`, `GOARM`, and `MOUNT_BASE`. Assignments from that file govern image variables and are exported to child commands; positional hostname, development-credential, and WiFi arguments still win.
+  - The base and drone processes optionally load `.base.env` and `.drone.env`, respectively, from their working directory before flag parsing. A missing file is allowed; a malformed present file must stop startup with a clear error.
+  - Both use `DRONEOS_CONFIG_FILE` as the default for `--config-file`; an explicit flag wins. Drone also accepts `DRONEOS_DISABLE_GC=1` or `true`.
+  - Go dotenv loading must preserve values already set in the process environment.
 - Default config: `configs/config.yaml`.
 - `base.host` and `base.port` are the address the drone uses for WiFi commands and device reports.
 - `base.controller` is looked up in `internal/controller/funcmap.go`; current value is usually `xbox360`.
@@ -119,6 +124,9 @@ This repository is a Go codebase for two cooperating runtimes: a base station an
   - `build.sh` does not run `go mod tidy`; dependency changes should be explicit.
 - `run.sh` assumes both binaries already exist under `build/droneOS/`.
 - `build_image.sh` repartitions and formats the target block device. Do not run it casually during verification.
+- `build_image.sh` loads optional project-root `.image.env` before resolving image defaults. The file uses shell syntax and can contain secrets; keep the ignored local file private and start from `.image.env.example`.
+- Production image builds copy the selected optional runtime role file—`.base.env` for base images or `.drone.env` for drone images—into `/opt/droneOS` with restrictive permissions. The selected file remains optional.
+- `sync_pi.sh` transfers `.drone.env` when present for development source sync but excludes `.image.env` and `.base.env` to avoid copying unrelated secrets.
 - Alpine image modes:
   - `BUILD_MODE=prod` builds and enables the `droneOS` OpenRC service, disables WiFi by default, and does not add network configuration.
   - `BUILD_MODE=dev` skips embedding the app binary, disables the `droneOS` service, enables WiFi/SSH, preloads dev APKs, and expects source sync/build on the Pi. Its credentials are for trusted networks only.

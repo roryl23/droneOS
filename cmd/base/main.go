@@ -2,11 +2,6 @@ package main
 
 import (
 	"context"
-	"droneOS/internal/config"
-	"droneOS/internal/controller"
-	"droneOS/internal/drivers/radio/SX1262"
-	"droneOS/internal/protocol"
-	"droneOS/internal/utils"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,6 +11,13 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"droneOS/internal/config"
+	"droneOS/internal/controller"
+	"droneOS/internal/drivers/radio/SX1262"
+	"droneOS/internal/envfile"
+	"droneOS/internal/protocol"
+	"droneOS/internal/utils"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -78,9 +80,18 @@ func initRadioLink(ctx context.Context, name string, cfg *config.Radio) (protoco
 }
 
 func main() {
+	if err := envfile.LoadOptional(".base.env"); err != nil {
+		fmt.Fprintf(os.Stderr, "base startup: failed to load .base.env: %v\n", err)
+		os.Exit(1)
+	}
+
+	configFileDefault := os.Getenv("DRONEOS_CONFIG_FILE")
+	if configFileDefault == "" {
+		configFileDefault = "configs/config.yaml"
+	}
 	configFile := flag.String(
 		"config-file",
-		"configs/config.yaml",
+		configFileDefault,
 		"config file location",
 	)
 	flag.Parse()

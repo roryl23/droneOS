@@ -2,6 +2,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"math"
+	"os"
+	"os/signal"
+	"runtime/debug"
+	"strings"
+	"sync/atomic"
+	"syscall"
+	"time"
+
 	"droneOS/internal/config"
 	"droneOS/internal/drivers/gpio"
 	"droneOS/internal/drivers/motor/MG90S"
@@ -16,20 +29,9 @@ import (
 	"droneOS/internal/drone/control"
 	"droneOS/internal/drone/control/obstacle_avoidance"
 	"droneOS/internal/drone/control/pilot"
+	"droneOS/internal/envfile"
 	"droneOS/internal/protocol"
 	"droneOS/internal/utils"
-	"encoding/json"
-	"flag"
-	"fmt"
-	"io"
-	"math"
-	"os"
-	"os/signal"
-	"runtime/debug"
-	"strings"
-	"sync/atomic"
-	"syscall"
-	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -353,9 +355,18 @@ func initRadioLink(ctx context.Context, name string, cfg *config.Radio) (protoco
 }
 
 func main() {
+	if err := envfile.LoadOptional(".drone.env"); err != nil {
+		fmt.Fprintf(os.Stderr, "drone startup: failed to load .drone.env: %v\n", err)
+		os.Exit(1)
+	}
+
+	configFileDefault := os.Getenv("DRONEOS_CONFIG_FILE")
+	if configFileDefault == "" {
+		configFileDefault = "configs/config.yaml"
+	}
 	configFile := flag.String(
 		"config-file",
-		"configs/config.yaml",
+		configFileDefault,
 		"config file location",
 	)
 	flag.Parse()
