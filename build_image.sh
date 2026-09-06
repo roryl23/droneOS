@@ -44,6 +44,20 @@ environment:
   UART_CONSOLE_EXTRA_TTYS=ttyS0
                              extra serial console TTYs (default: dev=ttyS0, prod empty)
   UART_CONSOLE_BAUD=115200   serial console baud rate
+  ENABLE_REALTIME_KERNEL=1  install PREEMPT_RT kernel (default: drone=1, base=0)
+  RT_KERNEL_BUNDLE=/path   optional prebuilt realtime kernel media bundle
+  RT_KERNEL_CACHE_DIR=...  generated realtime kernel bundle cache
+  RT_APORTS_REF=3.24-stable
+                             Alpine aports branch or commit used for the kernel
+  RT_KERNEL_FORCE_REBUILD=1 rebuild a cached realtime kernel bundle
+  RT_BUILD_CONTAINER_IMAGE=alpine:3.24
+                             optional matching Alpine build container
+  DRONEOS_RT_ENABLE=1      enable realtime control-thread scheduling
+  DRONEOS_RT_POLICY=fifo    runtime scheduler policy: fifo or rr
+  DRONEOS_RT_PRIORITY=20    runtime scheduler priority, 1 through 99
+  DRONEOS_RT_CPU=-1         control-thread CPU, or -1 for no affinity
+  DRONEOS_RT_MLOCK=0        lock current/future process memory when 1
+  DRONEOS_RT_STRICT=1       stop if realtime runtime setup fails
 EOF
 }
 
@@ -192,6 +206,151 @@ resolve_alpine_tarball() {
   if [[ ! -f "$ALPINE_IMAGE_PATH" ]]; then
     echo "downloading ${ALPINE_IMAGE_URL}..."
     wget -O "$ALPINE_IMAGE_PATH" "$ALPINE_IMAGE_URL"
+  fi
+}
+
+resolve_alpine_release() {
+  local release_line
+
+  release_line=$(tar -xOf "$ALPINE_IMAGE_PATH" ./.alpine-release 2>/dev/null || true)
+  release_line=${release_line#alpine-rpi-}
+  ALPINE_RELEASE=${release_line%% *}
+  if ! [[ "$ALPINE_RELEASE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "could not determine Alpine release from ${ALPINE_IMAGE_PATH}" >&2
+    exit 1
+  fi
+  ALPINE_SERIES=${ALPINE_RELEASE%.*}
+}
+
+validate_realtime_kernel_bundle() {
+  local bundle=$1
+  local members member config_member config_suffix map_suffix provenance_member provenance
+  local -a config_members=() map_members=()
+  local required=(
+    boot/vmlinuz-rpi
+    boot/initramfs-rpi
+    boot/modloop-rpi
+    droneos-rt-kernel-build.txt
+  )
+
+  if [[ ! -f "$bundle" ]]; then
+    echo "realtime kernel bundle not found: ${bundle}" >&2
+    return 1
+  fi
+  members=$(tar -tzf "$bundle") || {
+    echo "invalid realtime kernel bundle: ${bundle}" >&2
+    return 1
+  }
+  while IFS= read -r member; do
+    member=${member#./}
+    case "$member" in
+      "")
+        continue
+        ;;
+      /*|../*|*/../*)
+        echo "unsafe path in realtime kernel bundle: ${member}" >&2
+        return 1
+        ;;
+    esac
+  done <<< "$members"
+  for member in "${required[@]}"; do
+    if ! grep -Eq "^(\./)?${member}$" <<< "$members"; then
+      echo "realtime kernel bundle is missing ${member}: ${bundle}" >&2
+      return 1
+    fi
+  done
+  mapfile -t config_members < <(grep -E '^(\./)?boot/config-[^/]+$' <<< "$members")
+  mapfile -t map_members < <(grep -E '^(\./)?boot/System\.map-[^/]+$' <<< "$members")
+  if [[ "${#config_members[@]}" -ne 1 || "${#map_members[@]}" -ne 1 ]]; then
+    echo "realtime kernel bundle must contain exactly one versioned config and System.map: ${bundle}" >&2
+    return 1
+  fi
+  config_member=${config_members[0]}
+  config_suffix=${config_member##*/config-}
+  map_suffix=${map_members[0]##*/System.map-}
+  if [[ "$config_suffix" != "$map_suffix" ]]; then
+    echo "realtime kernel bundle config and System.map versions differ: ${bundle}" >&2
+    return 1
+  fi
+  if ! tar -xOf "$bundle" "$config_member" | grep -x 'CONFIG_PREEMPT_RT=y' >/dev/null; then
+    echo "kernel bundle does not enable CONFIG_PREEMPT_RT: ${bundle}" >&2
+    return 1
+  fi
+  provenance_member=$(grep -E '^(\./)?droneos-rt-kernel-build\.txt$' <<< "$members")
+  provenance=$(tar -xOf "$bundle" "$provenance_member")
+  if ! grep -Fqx "alpine_requested_release=${ALPINE_RELEASE}" <<< "$provenance" ||
+      ! grep -Fqx "arch=${ALPINE_ARCH}" <<< "$provenance"; then
+    echo "realtime kernel bundle does not match Alpine ${ALPINE_RELEASE} ${ALPINE_ARCH}: ${bundle}" >&2
+    return 1
+  fi
+  if ! grep -Eq '^(\./)?bcm(2711|2712)-[^/]+\.dtb$' <<< "$members"; then
+    echo "realtime kernel bundle has no Raspberry Pi 4/5 device tree: ${bundle}" >&2
+    return 1
+  fi
+  if ! grep -Eq '^(\./)?overlays/[^/]+\.dtbo$' <<< "$members"; then
+    echo "realtime kernel bundle has no Raspberry Pi overlays: ${bundle}" >&2
+    return 1
+  fi
+}
+
+prepare_realtime_kernel() {
+  local force_arg=()
+
+  resolve_alpine_release
+  RT_APORTS_REF=${RT_APORTS_REF:-"${ALPINE_SERIES}-stable"}
+  RT_KERNEL_CACHE_DIR=${RT_KERNEL_CACHE_DIR:-"${BUILD_DIR}/rt-kernel"}
+  if [[ -n "${RT_KERNEL_BUNDLE:-}" ]]; then
+    RT_KERNEL_BUNDLE_PATH=$RT_KERNEL_BUNDLE
+  else
+    RT_KERNEL_BUNDLE_PATH=$(bash "$PROJECT_DIR/build_rt_kernel.sh" \
+      --alpine-release "$ALPINE_RELEASE" \
+      --arch "$ALPINE_ARCH" \
+      --aports-ref "$RT_APORTS_REF" \
+      --cache-dir "$RT_KERNEL_CACHE_DIR" \
+      --print-cache-path)
+    if [[ "$RT_KERNEL_FORCE_REBUILD" -eq 1 ]]; then
+      force_arg=(--force)
+    fi
+    echo "building or reusing Alpine ${ALPINE_RELEASE} PREEMPT_RT kernel bundle..."
+    bash "$PROJECT_DIR/build_rt_kernel.sh" \
+      --alpine-release "$ALPINE_RELEASE" \
+      --arch "$ALPINE_ARCH" \
+      --aports-ref "$RT_APORTS_REF" \
+      --cache-dir "$RT_KERNEL_CACHE_DIR" \
+      "${force_arg[@]}"
+  fi
+  validate_realtime_kernel_bundle "$RT_KERNEL_BUNDLE_PATH"
+}
+
+install_realtime_kernel() {
+  local config_files
+
+  echo "installing PREEMPT_RT kernel bundle..."
+  "${SUDO[@]}" rm -f \
+    "${SD_CARD_BOOT_DIR}/boot/vmlinuz-rpi" \
+    "${SD_CARD_BOOT_DIR}/boot/initramfs-rpi" \
+    "${SD_CARD_BOOT_DIR}/boot/modloop-rpi"
+  "${SUDO[@]}" find "${SD_CARD_BOOT_DIR}/boot" -maxdepth 1 -type f \
+    \( -name 'config-*' -o -name 'System.map-*' \) -delete
+  "${SUDO[@]}" find "$SD_CARD_BOOT_DIR" -maxdepth 1 -type f -name '*.dtb' -delete
+  "${SUDO[@]}" find "${SD_CARD_BOOT_DIR}/overlays" -maxdepth 1 -type f -name '*.dtbo' -delete
+  "${SUDO[@]}" tar -xzf "$RT_KERNEL_BUNDLE_PATH" -C "$SD_CARD_BOOT_DIR"
+
+  for member in \
+    boot/vmlinuz-rpi \
+    boot/initramfs-rpi \
+    boot/modloop-rpi \
+    droneos-rt-kernel-build.txt; do
+    if [[ ! -s "${SD_CARD_BOOT_DIR}/${member}" ]]; then
+      echo "installed realtime kernel artifact is missing or empty: ${member}" >&2
+      exit 1
+    fi
+  done
+  mapfile -t config_files < <(find "${SD_CARD_BOOT_DIR}/boot" -maxdepth 1 -type f -name 'config-*' | sort)
+  if [[ "${#config_files[@]}" -ne 1 ]] ||
+      ! grep -qx 'CONFIG_PREEMPT_RT=y' "${config_files[0]}"; then
+    echo "installed kernel configuration does not uniquely enable CONFIG_PREEMPT_RT" >&2
+    exit 1
   fi
 }
 
@@ -585,6 +744,13 @@ create_openrc_overlay() {
 name="droneOS"
 description="droneOS ${TYPE} runtime"
 
+export DRONEOS_RT_ENABLE="${DRONEOS_RT_ENABLE}"
+export DRONEOS_RT_STRICT="${DRONEOS_RT_STRICT}"
+export DRONEOS_RT_POLICY="${DRONEOS_RT_POLICY}"
+export DRONEOS_RT_PRIORITY="${DRONEOS_RT_PRIORITY}"
+export DRONEOS_RT_CPU="${DRONEOS_RT_CPU}"
+export DRONEOS_RT_MLOCK="${DRONEOS_RT_MLOCK}"
+
 directory="${SERVICE_DIRECTORY}"
 command="${SERVICE_COMMAND}"
 command_args="${SERVICE_ARGS}"
@@ -662,6 +828,13 @@ cleanup_on_exit() {
     echo "build_image.sh failed with exit ${status}" >&2
   fi
 }
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
 
 SD_CARD=${1:-}
 KERNEL=${2:-kernel8}
@@ -745,7 +918,7 @@ else
   require_command sudo
 fi
 
-for cmd in basename cp find grep install lsblk mkdir mount mountpoint sed sort tail tar umount wget; do
+for cmd in basename cp find grep head install lsblk mkdir mount mountpoint sed sort tail tar umount wget; do
   require_command "$cmd"
 done
 for cmd in mkfs.vfat partprobe sfdisk sync; do
@@ -781,7 +954,14 @@ if [[ -z "${UART_CONSOLE_EXTRA_TTYS+x}" ]]; then
   fi
 fi
 UART_CONSOLE_BAUD=${UART_CONSOLE_BAUD:-115200}
-SKIP_KERNEL_BUILD=${SKIP_KERNEL_BUILD:-1}
+if [[ -z "${ENABLE_REALTIME_KERNEL+x}" ]]; then
+  if [[ "$TYPE" == "drone" ]]; then
+    ENABLE_REALTIME_KERNEL=1
+  else
+    ENABLE_REALTIME_KERNEL=0
+  fi
+fi
+RT_KERNEL_FORCE_REBUILD=${RT_KERNEL_FORCE_REBUILD:-0}
 INSTALL_PISUGAR=${INSTALL_PISUGAR:-0}
 
 case "$ALPINE_ARCH" in
@@ -803,8 +983,23 @@ case "$ALPINE_ARCH" in
     ;;
 esac
 
-if [[ "$SKIP_KERNEL_BUILD" -ne 1 ]]; then
-  echo "custom Raspberry Pi kernel builds are not part of the Alpine diskless image flow; use the Alpine rpi kernel or provide a custom tarball" >&2
+case "$ENABLE_REALTIME_KERNEL" in
+  0|1) ;;
+  *)
+    echo "ENABLE_REALTIME_KERNEL must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+case "$RT_KERNEL_FORCE_REBUILD" in
+  0|1) ;;
+  *)
+    echo "RT_KERNEL_FORCE_REBUILD must be 0 or 1" >&2
+    exit 1
+    ;;
+esac
+if [[ "$ENABLE_REALTIME_KERNEL" -eq 1 ]] &&
+    { [[ "$KERNEL" != "kernel8" ]] || [[ "$ALPINE_ARCH" != "aarch64" ]]; }; then
+  echo "PREEMPT_RT image builds currently require kernel8 and ALPINE_ARCH=aarch64" >&2
   exit 1
 fi
 
@@ -826,6 +1021,32 @@ else
   exit 1
 fi
 
+if [[ "$TYPE" == "drone" && "$ENABLE_REALTIME_KERNEL" -eq 1 ]]; then
+  DRONEOS_RT_ENABLE=${DRONEOS_RT_ENABLE:-1}
+  DRONEOS_RT_STRICT=${DRONEOS_RT_STRICT:-1}
+else
+  DRONEOS_RT_ENABLE=${DRONEOS_RT_ENABLE:-0}
+  DRONEOS_RT_STRICT=${DRONEOS_RT_STRICT:-0}
+fi
+DRONEOS_RT_POLICY=${DRONEOS_RT_POLICY:-fifo}
+DRONEOS_RT_PRIORITY=${DRONEOS_RT_PRIORITY:-20}
+DRONEOS_RT_CPU=${DRONEOS_RT_CPU:--1}
+DRONEOS_RT_MLOCK=${DRONEOS_RT_MLOCK:-0}
+
+case "$DRONEOS_RT_ENABLE" in 0|1|true|false) ;; *) echo "invalid DRONEOS_RT_ENABLE: ${DRONEOS_RT_ENABLE}" >&2; exit 1;; esac
+case "$DRONEOS_RT_STRICT" in 0|1|true|false) ;; *) echo "invalid DRONEOS_RT_STRICT: ${DRONEOS_RT_STRICT}" >&2; exit 1;; esac
+case "$DRONEOS_RT_MLOCK" in 0|1|true|false) ;; *) echo "invalid DRONEOS_RT_MLOCK: ${DRONEOS_RT_MLOCK}" >&2; exit 1;; esac
+case "$DRONEOS_RT_POLICY" in fifo|rr) ;; *) echo "invalid DRONEOS_RT_POLICY: ${DRONEOS_RT_POLICY}" >&2; exit 1;; esac
+if ! [[ "$DRONEOS_RT_PRIORITY" =~ ^[0-9]+$ ]] ||
+    (( DRONEOS_RT_PRIORITY < 1 || DRONEOS_RT_PRIORITY > 99 )); then
+  echo "DRONEOS_RT_PRIORITY must be between 1 and 99" >&2
+  exit 1
+fi
+if ! [[ "$DRONEOS_RT_CPU" =~ ^-1$|^[0-9]+$ ]]; then
+  echo "DRONEOS_RT_CPU must be -1 or a non-negative CPU number" >&2
+  exit 1
+fi
+
 DEVICE=$(normalize_device "$SD_CARD")
 BOOT_DEVICE=$(partition_path "$DEVICE" 1)
 MOUNT_BASE=${MOUNT_BASE:-/tmp/droneos_mnt}
@@ -841,6 +1062,9 @@ if [[ ! -b "$DEVICE" ]]; then
 fi
 
 resolve_alpine_tarball
+if [[ "$ENABLE_REALTIME_KERNEL" -eq 1 ]]; then
+  prepare_realtime_kernel
+fi
 
 if [[ "$ENABLE_UART_CONSOLE" -eq 1 ]]; then
   if ! [[ "$UART_CONSOLE_TTY" =~ ^tty[A-Za-z0-9_]+$ ]]; then
@@ -919,6 +1143,10 @@ mkdir -p "$SD_CARD_BOOT_DIR"
 
 echo "extracting ${ALPINE_IMAGE_FILE}..."
 "${SUDO[@]}" tar -xzf "$ALPINE_IMAGE_PATH" -C "$SD_CARD_BOOT_DIR"
+
+if [[ "$ENABLE_REALTIME_KERNEL" -eq 1 ]]; then
+  install_realtime_kernel
+fi
 
 if [[ "$ENABLE_DEV_ACCESS" -eq 1 ]]; then
   echo "installing local Alpine dev APK cache..."

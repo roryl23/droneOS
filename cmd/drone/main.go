@@ -31,6 +31,7 @@ import (
 	"droneOS/internal/drone/control/pilot"
 	"droneOS/internal/envfile"
 	"droneOS/internal/protocol"
+	"droneOS/internal/realtime"
 	"droneOS/internal/utils"
 
 	"github.com/rs/zerolog"
@@ -382,6 +383,51 @@ func main() {
 		zerolog.SetGlobalLevel(zerolog.Disabled)
 		log.Logger = zerolog.New(io.Discard).With().Timestamp().Logger()
 	}
+	startupError := func(message string, err error) {
+		fmt.Fprintf(os.Stderr, "drone startup: %s: %v\n", message, err)
+		log.Error().Err(err).Msg(message)
+	}
+
+	rtConfig, err := realtime.LoadConfig()
+	if err != nil {
+		startupError("invalid realtime configuration", err)
+		os.Exit(1)
+	}
+	rt, err := realtime.New(rtConfig, func(err error) {
+		log.Warn().Err(err).Msg("realtime setup issue; continuing")
+	})
+	if err != nil {
+		startupError("invalid realtime configuration", err)
+		os.Exit(1)
+	}
+	kernelStatus, kernelErr := realtime.DetectKernelRealtime()
+	if kernelErr != nil {
+		if rtConfig.Enabled && rtConfig.Strict {
+			startupError("cannot verify PREEMPT_RT kernel", kernelErr)
+			os.Exit(1)
+		}
+		log.Warn().Err(kernelErr).Msg("PREEMPT_RT kernel status is unavailable")
+	} else {
+		log.Info().
+			Bool("preempt_rt", kernelStatus.Enabled).
+			Str("source", kernelStatus.Source).
+			Msg("detected PREEMPT_RT kernel status")
+		if rtConfig.Enabled && rtConfig.Strict && !kernelStatus.Enabled {
+			startupError(
+				"realtime scheduling requires a PREEMPT_RT kernel",
+				fmt.Errorf("%s reports realtime disabled", kernelStatus.Source),
+			)
+			os.Exit(1)
+		}
+	}
+	if err := rt.Prepare(); err != nil {
+		startupError("realtime process preparation failed", err)
+		os.Exit(1)
+	}
+	if err := rt.Run(func() error { return nil }); err != nil {
+		startupError("realtime scheduler preflight failed", err)
+		os.Exit(1)
+	}
 
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
@@ -507,16 +553,19 @@ func main() {
 					Msg("not enough sensor channels for control algorithm")
 				return
 			}
-			_, err := utils.CallFunctionByName(
-				ctx,
-				ControlFuncMap,
-				name,
-				&settings,
-				index+1,
-				priorityMutex,
-				&sensorEventChannels[index],
-				&taskQueue,
-			)
+			err := rt.Run(func() error {
+				_, err := utils.CallFunctionByName(
+					ctx,
+					ControlFuncMap,
+					name,
+					&settings,
+					index+1,
+					priorityMutex,
+					&sensorEventChannels[index],
+					&taskQueue,
+				)
+				return err
+			})
 			if err != nil {
 				log.Error().Err(err).Msg("error initializing control algorithms")
 				return

@@ -7,7 +7,7 @@ A Go prototype for coordinating a base station and Raspberry Pi drone over frame
 ## Current Architecture And Hardware Status
 
 - **Base runtime** (`cmd/base/main.go`) optionally loads `.base.env`, then uses `configs/config.yaml` by default or a path from `DRONEOS_CONFIG_FILE` or `--config-file`. It listens on `0.0.0.0:<base.port>`, optionally queues Xbox 360 controller input, and optionally serves framed protocol requests over the configured radio link.
-- **Drone runtime** (`cmd/drone/main.go`) optionally loads `.drone.env`, then uses the same default/overridable config path. It polls the base over WiFi, polls controller commands and sends device-state reports over WiFi, and can send a radio `ping` keepalive every five seconds. Device reports are collected every 10 seconds but sent only while WiFi is connected. `AutoTransport` is not the entrypoint's automatic failover path.
+- **Drone runtime** (`cmd/drone/main.go`) optionally loads `.drone.env`, then uses the same default/overridable config path. It polls the base over WiFi, polls controller commands and sends device-state reports over WiFi, and can send a radio `ping` keepalive every five seconds. Device reports are collected every 10 seconds but sent only while WiFi is connected. Configured control algorithms can run on pinned `SCHED_FIFO`/`SCHED_RR` threads when the realtime environment is enabled. `AutoTransport` is not the entrypoint's automatic failover path.
 - **Protocol** messages are JSON fields `Id`, `Cmd`, and `Data`, prefixed by a 4-byte big-endian payload length and limited to 64 KiB. TCP handles one request per connection; radio receives, dispatches, and replies in a loop. Current commands are `ping`, `device_state`, `debug_log`, `next_command`, and `controller_ack`.
 - **SX1262** is the only registered radio driver and has a Linux build tag. It supports GPIO/UART and USB serial modes, but GPIO-mode radio configuration uses placeholder register values and USB mode depends on correct physical jumpers. It is not a verified generic LoRa implementation.
 - **Hardware support is partial.** MPU-6050 has an I2C identity probe and GT-U7 checks only for a configured serial device. Other sensor/output detection is configuration/GPIO inspection. Sensor, motor, and control packages are mostly stubs or have reflection signature mismatches when enabled. Camera and battery packages are empty; PiSugar installation is rejected by the Alpine image builder.
@@ -42,7 +42,7 @@ go version
 bash setup.sh
 ```
 
-On Ubuntu, install equivalent tools plus one development-image APK fetcher (`apk-tools`, Docker, or Podman). Ensure `golang-go` provides Go 1.23 or newer; otherwise install a newer Go toolchain.
+On Ubuntu, install equivalent tools plus Docker or Podman. Realtime-kernel builds require a container engine capable of running an `aarch64` Alpine container through binfmt/QEMU. Ensure `golang-go` provides Go 1.23 or newer; otherwise install a newer Go toolchain.
 
 ```bash
 sudo apt install ca-certificates dosfstools parted util-linux golang-go wget openssl openssh-client rsync tar docker.io
@@ -87,7 +87,7 @@ Parameters:
 - `drone` selects `cmd/drone/main.go`; use `base` for `cmd/base/main.go`.
 - `droneos` is the image hostname. The builder writes the diskless Alpine overlay as `droneos.apkovl.tar.gz` at the boot-partition root and keeps its filename aligned with the hostname by convention.
 
-The builder downloads or reuses an Alpine Raspberry Pi tarball, creates FAT boot media, and writes the overlay plus boot settings. Production images cross-compile and embed the selected runtime, `configs/config.yaml`, and an optional selected role file.
+The builder downloads or reuses an Alpine Raspberry Pi tarball, creates FAT boot media, and writes the overlay plus boot settings. Drone images build and install an Alpine-native `CONFIG_PREEMPT_RT=y` kernel by default; base images retain Alpine's stock kernel by default. Production images cross-compile and embed the selected runtime, `configs/config.yaml`, and an optional selected role file.
 
 > **Known Alpine overlay limitation:** `create_openrc_overlay` does not create `etc/.default_boot_services`. Standard boot services and hostname initialization may therefore not run, and console prompts can show `(none)`. This is an unfixed limitation; treat generated media as bring-up artifacts rather than dependable boot environments.
 
@@ -117,6 +117,43 @@ bash build_image.sh /dev/sdX kernel8 drone
 Development mode skips compiling and embedding the application, leaves the `droneOS` service disabled, and expects source synchronization and a local build on the Pi. A drone image is a WiFi client using `wpa_supplicant`; a base image creates a `wlan0` access point at `10.42.0.1` on channel 6 and serves `10.42.0.50`–`10.42.0.150` through `dnsmasq`.
 
 For each development image, the builder deletes stale APK files from `build/dev-apks/<branch>/<arch>/<type>` and refetches the package closure: Go/SSH/rsync/network packages, plus `hostapd` and `dnsmasq` for base images or `wpa_supplicant` for drone images. It tries host `apk`, then Docker, then Podman; set `APK_FETCH_CONTAINER_IMAGE` for the container fallback. A failed fetch aborts the image build. The cache is copied to `droneos-apks/<arch>` on the boot media; `droneos-dev-setup` tries an offline install from mounted `/media`/`/mnt` paths (or `/droneos-apks`) before a network install. If neither works, development setup cannot complete.
+
+### Realtime Kernel And Runtime
+
+For `kernel8 drone` images, `ENABLE_REALTIME_KERNEL` defaults to `1`. `build_rt_kernel.sh` runs the matching Alpine `aarch64` userspace through Docker or Podman, rebuilds Alpine's `linux-rpi` package with `CONFIG_PREEMPT_RT=y`, and uses Alpine's `update-kernel` to generate one matching kernel, initramfs, modloop, module, firmware, and device-tree set. Without `--output`, it hashes the aports ref into the shared `build/rt-kernel` cache filename, so standalone and image builds address the same validated bundle. Set `RT_KERNEL_FORCE_REBUILD=1` for an image build, or pass `--force` directly to the kernel builder, to rebuild it.
+
+Pin `RT_APORTS_REF` to an Alpine aports commit for reproducible production media. Its default is the stable branch matching the selected Alpine tarball, such as `3.24-stable`. The image builder rejects bundles missing the kernel, initramfs, modloop, Pi device trees, overlays, provenance, or a versioned configuration containing `CONFIG_PREEMPT_RT=y`. Use `--output` or `RT_KERNEL_BUNDLE` only for deliberately exported external bundles.
+
+```bash
+# Build the automatically named shared-cache bundle without writing an SD card.
+bash build_rt_kernel.sh \
+  --alpine-release 3.24.1 \
+  --arch aarch64 \
+  --aports-ref 3.24-stable
+
+# Resume packaging after a post-build failure without recompiling the kernel.
+bash build_rt_kernel.sh \
+  --alpine-release 3.24.1 \
+  --arch aarch64 \
+  --aports-ref 3.24-stable \
+  --resume-work build/rt-kernel/.rt-kernel-build.EXAMPLE
+
+# Build media; repeated invocations reuse the validated shared-cache bundle.
+bash build_image.sh /dev/sdX kernel8 drone droneos
+```
+
+The generated OpenRC service enables strict realtime scheduling for drone images that install the RT kernel. Startup verifies PREEMPT_RT and proves the requested scheduler/affinity settings before launching runtime loops. Each configured control algorithm then locks its goroutine to one OS thread and applies `SCHED_FIFO` priority 20 by default. Override `DRONEOS_RT_POLICY`, `DRONEOS_RT_PRIORITY`, or `DRONEOS_RT_CPU` in `.image.env`; `-1` leaves CPU affinity unchanged. `DRONEOS_RT_MLOCK=1` additionally requests process-wide `MCL_CURRENT|MCL_FUTURE` and should only be enabled with a sufficient memory-lock limit. Strict mode exits instead of launching controls when kernel verification, memory locking, or scheduler preflight fails.
+
+Local/source-sync runs remain non-RT unless `.drone.env` sets `DRONEOS_RT_ENABLE=1`. `DRONEOS_RT_STRICT=0` permits startup when permissions or kernel support are unavailable and logs the setup failure; use that only for development. A PREEMPT_RT kernel and FIFO policy reduce scheduling latency but do not make blocking I/O, Go allocation/GC, drivers, or application logic hard real-time.
+
+After boot, verify the installed kernel rather than trusting the bundle name:
+
+```bash
+uname -a
+grep '^CONFIG_PREEMPT_RT=y$' /boot/config-*
+```
+
+The kernel banner must identify `PREEMPT_RT`, and exactly one installed kernel configuration must enable it. Measure worst-case latency under representative WiFi, radio, storage, and device load before relying on realtime behavior.
 
 ### UART Console
 
@@ -149,7 +186,7 @@ cp .base.env.example .base.env
 cp .drone.env.example .drone.env
 ```
 
-`build_image.sh` loads project-root `.image.env` before resolving image defaults; see `.image.env.example` and `bash build_image.sh --help` for supported image settings. The base and drone runtimes load `.base.env` and `.drone.env`, respectively, from their working directory before flag parsing. `DRONEOS_CONFIG_FILE` supplies the default for `--config-file`, but an explicit `--config-file` wins. Existing process environment values take precedence over the role file. A missing role file is optional; a present malformed file stops startup. Drone also accepts `DRONEOS_DISABLE_GC=1` or `true` for specialized profiling.
+`build_image.sh` loads project-root `.image.env` before resolving image defaults; see `.image.env.example` and `bash build_image.sh --help` for supported image settings. The base and drone runtimes load `.base.env` and `.drone.env`, respectively, from their working directory before flag parsing. `DRONEOS_CONFIG_FILE` supplies the default for `--config-file`, but an explicit `--config-file` wins. Existing process environment values take precedence over the role file. A missing role file is optional; a present malformed file stops startup. Drone also accepts `DRONEOS_DISABLE_GC` and the validated `DRONEOS_RT_ENABLE`, `DRONEOS_RT_STRICT`, `DRONEOS_RT_POLICY`, `DRONEOS_RT_PRIORITY`, `DRONEOS_RT_CPU`, and `DRONEOS_RT_MLOCK` settings described above.
 
 Production images copy the selected optional role file to `/opt/droneOS` with restrictive permissions. Development sync intentionally transfers `.drone.env` when present, but excludes `.image.env` and `.base.env`; copy the correct example on the target when another role needs local settings.
 
@@ -180,10 +217,10 @@ Only production images embed the repository's `configs/config.yaml`; development
 go test ./...
 go test ./cmd/dev/pi_runner
 go build ./cmd/base ./cmd/drone ./cmd/dev/pi_runner
-bash -n build.sh setup.sh sync_pi.sh pi_runner.sh build_image.sh
+bash -n build.sh build_rt_kernel.sh setup.sh sync_pi.sh pi_runner.sh build_image.sh
 ```
 
-These checks cover protocol WiFi behavior and serial-runner behavior. They do not validate real GPIO, SX1262/radio hardware, configured sensor/motor/control plugins, controller hardware, OpenRC boot, or Alpine SD-card media.
+These checks cover protocol WiFi behavior, realtime runtime configuration/setup sequencing, and serial-runner behavior. They do not measure realtime latency or validate real GPIO, SX1262/radio hardware, configured sensor/motor/control plugins, controller hardware, OpenRC boot, or Alpine SD-card media. Validate a kernel bundle separately and boot it on the target Pi before treating the image path as proven.
 
 ## Sync And Serial Bring-Up
 
@@ -250,6 +287,7 @@ Development images provide SSH setup but leave that service disabled; build and 
 - `internal/drone/control/`: placeholder control loops.
 - `setup.sh`: Alpine host dependency installer.
 - `build.sh`: static Linux base/drone binary builder.
+- `build_rt_kernel.sh`: Alpine `linux-rpi` PREEMPT_RT package and validated boot-bundle builder.
 - `run.sh`: local launcher for both prebuilt binaries.
 - `build_image.sh`: destructive Alpine Raspberry Pi SD-card image builder.
 - `sync_pi.sh`: SSH/rsync development-tree synchronization.

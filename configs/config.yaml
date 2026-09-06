@@ -6,8 +6,8 @@ base:
   radio:
     name: SX1262
     alwaysUse: False
-    usbId: auto  # Base station uses USB mode
-    usbScan: true
+    usbId: /dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0  # Base station uses USB mode
+    usbScan: false
 drone:
   id: 1
   gpioLayout: rpi-40

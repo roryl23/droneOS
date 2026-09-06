@@ -40,19 +40,21 @@ This repository is a Go codebase for two cooperating runtimes: a base station an
 - `internal/drivers/radio/SX1262/main.go`: LoRa HAT/USB serial radio link.
 - `internal/drivers/camera/OV5647/main.go` and `internal/drone/battery.go`: empty placeholders today.
 - `build.sh`: static Linux build wrapper for base or drone binaries.
-- `build_image.sh`: destructive Alpine Raspberry Pi SD-card image builder.
+- `build_image.sh`: destructive Alpine Raspberry Pi SD-card image builder; drone images install a validated PREEMPT_RT kernel bundle by default.
+- `build_rt_kernel.sh`: builds Alpine's Raspberry Pi kernel with `CONFIG_PREEMPT_RT=y` in an emulated `aarch64` Alpine container and emits a complete diskless-media kernel bundle.
 - `run.sh`: runs prebuilt `build/droneOS/base.bin` and `build/droneOS/drone.bin` together.
 - `sync_pi.sh`: rsync source tree to a development Pi over SSH.
 - `pi_runner.sh`: thin wrapper around `go run ./cmd/dev/pi_runner`; use it for UART console bring-up and scripted serial command execution.
 - `.buildenv`: legacy build flags, not sourced by the current shell scripts.
-- `configs/.config`: generated Linux kernel config; current Alpine image flow does not build a kernel from it.
+- `configs/.config`: legacy generated Linux 6.6 configuration retained as reference; the Alpine RT builder derives its configuration from the matching `linux-rpi` aport instead.
 
 ## Config Contracts
 
 - Optional role environment files are local and may contain secrets:
-  - `build_image.sh` loads project-root `.image.env` as shell syntax before resolving its environment-backed defaults. It supports `BUILD_MODE`, `IMAGE_HOSTNAME`, `DEV_USER_NAME`, `DEV_USER_PASSWORD`, `WIFI_SSID`, `WIFI_PASSWORD`, `WIFI_COUNTRY`, `DEV_PROJECT_DIR`, `BUILD_DIR`, `ALPINE_MIRROR`, `ALPINE_BRANCH`, `ALPINE_ARCH`, `ALPINE_VERSION`, `ALPINE_TARBALL`, `ALPINE_TARBALL_URL`, `ALPINE_CACHE_DIR`, `APK_FETCH_CONTAINER_IMAGE`, `DISABLE_WIFI`, `DISABLE_BLUETOOTH`, `ENABLE_UART_CONSOLE`, `UART_CONSOLE_TTY`, `UART_CONSOLE_EXTRA_TTYS`, `UART_CONSOLE_BAUD`, `SKIP_KERNEL_BUILD`, `INSTALL_PISUGAR`, `GOARM`, and `MOUNT_BASE`. Assignments from that file govern image variables and are exported to child commands; positional hostname, development-credential, and WiFi arguments still win.
+  - `build_image.sh` loads project-root `.image.env` as shell syntax before resolving its environment-backed defaults. In addition to image, credential, WiFi, UART, architecture, and cache settings listed by `bash build_image.sh --help`, it supports `ENABLE_REALTIME_KERNEL`, `RT_KERNEL_BUNDLE`, `RT_KERNEL_CACHE_DIR`, `RT_APORTS_REF`, `RT_KERNEL_FORCE_REBUILD`, `RT_BUILD_CONTAINER_IMAGE`, and the `DRONEOS_RT_*` service settings. Assignments from that file govern image variables and are exported to child commands; positional hostname, development-credential, and WiFi arguments still win.
   - The base and drone processes optionally load `.base.env` and `.drone.env`, respectively, from their working directory before flag parsing. A missing file is allowed; a malformed present file must stop startup with a clear error.
-  - Both use `DRONEOS_CONFIG_FILE` as the default for `--config-file`; an explicit flag wins. Drone also accepts `DRONEOS_DISABLE_GC=1` or `true`.
+  - Both use `DRONEOS_CONFIG_FILE` as the default for `--config-file`; an explicit flag wins. Drone also accepts `DRONEOS_DISABLE_GC` plus `DRONEOS_RT_ENABLE`, `DRONEOS_RT_STRICT`, `DRONEOS_RT_POLICY`, `DRONEOS_RT_PRIORITY`, `DRONEOS_RT_CPU`, and `DRONEOS_RT_MLOCK`.
+  - Realtime scheduling applies only to configured control-algorithm goroutines. Each enabled worker locks to its OS thread before applying optional affinity and `SCHED_FIFO`/`SCHED_RR`; memory locking is process-wide and opt-in.
   - Go dotenv loading must preserve values already set in the process environment.
 - Default config: `configs/config.yaml`.
 - `base.host` and `base.port` are the address the drone uses for WiFi commands and device reports.
@@ -136,7 +138,8 @@ This repository is a Go codebase for two cooperating runtimes: a base station an
 - `UART_CONSOLE_EXTRA_TTYS` is a space-separated fallback list. It appends extra `console=<tty>,<baud>` tokens and adds extra serial gettys in the dev overlay; set it to an empty value only when another UART device must own that TTY during development.
 - `write_boot_config` must preserve multiple `console=` tokens; use token-level appending for UART console entries.
 - `configs/config-kernel8.txt` is reference boot config, but `build_image.sh` writes boot settings into the extracted Alpine boot partition.
-- `SKIP_KERNEL_BUILD` must remain `1`; custom Raspberry Pi kernel builds are not part of the current Alpine diskless image flow.
+- `ENABLE_REALTIME_KERNEL` defaults to `1` for `kernel8 drone` images and `0` for base images. RT builds currently support only `aarch64`; the builder validates `CONFIG_PREEMPT_RT=y` and installs kernel, initramfs, modloop/modules, DTBs, and overlays as one bundle.
+- `build_rt_kernel.sh` must keep using the Alpine release's `linux-rpi` aport and `update-kernel`; do not restore the historical Raspberry Pi OS kernel copier or external 6.6 RT patch flow. Linux 6.12 and newer contain PREEMPT_RT in mainline.
 - For dev Pis, use `sync_pi.sh <host> [remote-dir]`; override with `DRONEOS_PI_USER`, `DRONEOS_PI_PORT`, `DRONEOS_PI_DIR`, and `DRONEOS_RSYNC_DELETE`.
 - `pi_runner.sh` supports `list`, `console`, `loopback`, `wait`, and `exec`. Automatic discovery sorts `/dev/serial/by-id` before `/dev/ttyUSB*` and `/dev/ttyACM*`, resolves and deduplicates aliases by device target, and keeps the stable by-id name as the canonical candidate. One canonical candidate is selected automatically; distinct devices require `--serial` or `DRONEOS_SERIAL_DEVICE`.
 - Interactive `pi_runner.sh console` places terminal stdin in raw mode, transparently forwards terminal replies such as ANSI cursor-position reports, restores the workstation terminal on every exit path, and keeps `Ctrl-C` as the local exit command. Piped and other non-TTY input remains unchanged.
@@ -152,11 +155,11 @@ Run focused checks for the files you touch. Useful commands:
 - `go test ./...`
 - `go test ./cmd/dev/pi_runner`
 - `go build ./cmd/base ./cmd/drone ./cmd/dev/pi_runner`
-- `bash -n build.sh setup.sh sync_pi.sh pi_runner.sh build_image.sh`
-- `shellcheck build.sh setup.sh sync_pi.sh pi_runner.sh build_image.sh` if `shellcheck` is installed
+- `bash -n build.sh build_rt_kernel.sh setup.sh sync_pi.sh pi_runner.sh build_image.sh`
+- `shellcheck build.sh build_rt_kernel.sh setup.sh sync_pi.sh pi_runner.sh build_image.sh` if `shellcheck` is installed
 - `git diff --check`
 
-Local Go tests cover WiFi transport behavior and the UART runner's transient-EOF handling, raw-console cursor-position forwarding and interrupt behavior, mode-specific flag rejection, short-write reporting, and canonical by-id alias selection. `TestSerialCandidatesPreferStableByIDAlias` verifies that sorted by-id aliases resolving to one device collapse to the first stable alias and that distinct devices require explicit selection. They do not validate configured sensor/motor reflection signatures, real GPIO, LoRa hardware, OpenRC behavior, Alpine boot media, or controller hardware.
+Local Go tests cover WiFi transport behavior, realtime environment validation/setup sequencing, and the UART runner's transient-EOF handling, raw-console cursor-position forwarding and interrupt behavior, mode-specific flag rejection, short-write reporting, and canonical by-id alias selection. They do not validate measured PREEMPT_RT latency, configured hardware/control plugins, real GPIO, LoRa hardware, OpenRC behavior, Alpine SD-card boot, or controller hardware. Kernel-image verification must additionally inspect the generated bundle and boot the target Pi.
 
 ## Contribution Guidelines
 
