@@ -10,6 +10,7 @@ usage:
   bash pi_runner.sh [flags] wait
   bash pi_runner.sh [flags] exec --command 'cd /home/admin/droneOS && go test ./...'
   bash pi_runner.sh [flags] exec 'uname -a'
+  bash pi_runner.sh [flags] upload --file build/droneOS/drone.bin --remote /home/<user>/drone.bin
 
 important flags:
   --serial path|auto          select a serial device; auto is the default
@@ -19,8 +20,10 @@ important flags:
   --wait-marker text          text required by wait mode; default: login:
   --verbose                   mirror login traffic during exec
   --command text              command for exec mode only
-  --user name                 login user for exec
-  --password value            login password for exec
+  --file path                 local file for upload mode only
+  --remote path               remote destination for upload mode only
+  --user name                 login user for exec or upload
+  --password value            login password for exec or upload
 
 environment:
   DRONEOS_SERIAL_DEVICE=/dev/serial/by-id/...
@@ -30,6 +33,8 @@ environment:
   DRONEOS_SERIAL_WAIT_MARKER=login:
   DRONEOS_PI_USER=admin
   DRONEOS_PI_PASSWORD=...
+  DRONEOS_UPLOAD_FILE=build/droneOS/drone.bin
+  DRONEOS_UPLOAD_REMOTE=/home/<user>/drone.bin
 
 Use `list` first when more than one USB serial adapter is attached.
 EOF

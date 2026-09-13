@@ -264,12 +264,6 @@ func scanGPIOPins() ([]protocol.GPIOPinState, []error) {
 				Bias:      gpioBias(info.Config.Bias),
 			}
 
-			if !info.Used {
-				if value, err := readGPIOValue(chipName, offset); err == nil {
-					state.Value = &value
-				}
-			}
-
 			states = append(states, state)
 		}
 		_ = chip.Close()
@@ -283,15 +277,6 @@ func scanGPIOPins() ([]protocol.GPIOPinState, []error) {
 	})
 
 	return states, errs
-}
-
-func readGPIOValue(chip string, offset int) (int, error) {
-	line, err := gpiocdev.RequestLine(chip, offset, gpiocdev.AsIs)
-	if err != nil {
-		return 0, err
-	}
-	defer line.Close()
-	return line.Value()
 }
 
 func readSysfsValue(dir, name string) string {

@@ -2,8 +2,9 @@ package protocol
 
 import (
 	"context"
-	"droneOS/internal/utils"
 	"time"
+
+	"droneOS/internal/utils"
 
 	"github.com/rs/zerolog"
 )
@@ -42,6 +43,12 @@ func ServeRadio(ctx context.Context, link RadioLink) {
 			logger.Debug().Err(err).Msg("radio decode failed")
 			continue
 		}
+		logger.Debug().
+			Str("transport", "radio").
+			Int("id", msg.ID).
+			Str("command", msg.Cmd).
+			Str("request_data", msg.Data).
+			Msg("radio request received")
 
 		output, err := utils.CallFunctionByName(ctx, FuncMap, msg.Cmd, msg)
 		if err != nil {
@@ -60,6 +67,13 @@ func ServeRadio(ctx context.Context, link RadioLink) {
 		}
 		if err := link.Send(payload); err != nil {
 			logger.Error().Err(err).Msg("radio send failed")
+			continue
 		}
+		logger.Debug().
+			Str("transport", "radio").
+			Int("id", response.ID).
+			Str("command", response.Cmd).
+			Str("response_data", response.Data).
+			Msg("radio response sent")
 	}
 }

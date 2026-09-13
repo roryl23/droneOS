@@ -3,6 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -32,8 +36,10 @@ type options struct {
 	baud       int
 	command    string
 	device     string
+	file       string
 	password   string
 	poke       time.Duration
+	remote     string
 	timeout    time.Duration
 	user       string
 	verbose    bool
@@ -118,6 +124,11 @@ func runCLI() (exitCode int) {
 			reportCLIError(err)
 			return 1
 		}
+	case "upload":
+		if err := runUpload(ctx, port, opts); err != nil {
+			reportCLIError(err)
+			return 1
+		}
 	default:
 		reportCLIError(fmt.Errorf("unsupported mode %q", mode))
 		return 2
@@ -143,8 +154,10 @@ func parseFlags(args []string) (options, string, error) {
 	opts := options{
 		baud:       envInt("DRONEOS_SERIAL_BAUD", defaultBaud),
 		device:     envString("DRONEOS_SERIAL_DEVICE", "auto"),
+		file:       envString("DRONEOS_UPLOAD_FILE", ""),
 		password:   envString("DRONEOS_PI_PASSWORD", ""),
 		poke:       envDuration("DRONEOS_SERIAL_POKE_INTERVAL", 2*time.Second),
+		remote:     envString("DRONEOS_UPLOAD_REMOTE", ""),
 		timeout:    envDuration("DRONEOS_SERIAL_TIMEOUT", defaultTimeout),
 		user:       envString("DRONEOS_PI_USER", "admin"),
 		waitMarker: envString("DRONEOS_SERIAL_WAIT_MARKER", "login:"),
@@ -166,6 +179,8 @@ func parseFlags(args []string) (options, string, error) {
 		return opts, "", fmt.Errorf("%v\n%s", err, usage())
 	}
 	commandSet := flagWasSet(leading, "command") || flagWasSet(trailing, "command")
+	fileSet := flagWasSet(leading, "file") || flagWasSet(trailing, "file")
+	remoteSet := flagWasSet(leading, "remote") || flagWasSet(trailing, "remote")
 	rest = trailing.Args()
 	if len(rest) > 0 {
 		if mode != "exec" || opts.command != "" {
@@ -183,11 +198,23 @@ func parseFlags(args []string) (options, string, error) {
 	if commandSet && mode != "exec" {
 		return opts, "", errors.New("--command is only valid with exec mode")
 	}
+	if fileSet && mode != "upload" {
+		return opts, "", errors.New("--file is only valid with upload mode")
+	}
+	if remoteSet && mode != "upload" {
+		return opts, "", errors.New("--remote is only valid with upload mode")
+	}
 	if mode == "wait" && opts.waitMarker == "" {
 		return opts, "", errors.New("wait mode requires a non-empty --wait-marker")
 	}
 	if mode == "exec" && opts.command == "" {
 		return opts, "", errors.New("exec mode requires --command or a command after exec")
+	}
+	if mode == "upload" && opts.file == "" {
+		return opts, "", errors.New("upload mode requires --file or DRONEOS_UPLOAD_FILE")
+	}
+	if mode == "upload" && opts.remote == "" {
+		return opts, "", errors.New("upload mode requires --remote or DRONEOS_UPLOAD_REMOTE")
 	}
 	return opts, mode, nil
 }
@@ -198,10 +225,12 @@ func newFlagSet(opts *options) *flag.FlagSet {
 	fs.IntVar(&opts.baud, "baud", opts.baud, "serial baud rate")
 	fs.StringVar(&opts.command, "command", opts.command, "command for exec mode")
 	fs.StringVar(&opts.device, "serial", opts.device, "serial device path or auto")
-	fs.StringVar(&opts.password, "password", opts.password, "login password for exec mode")
+	fs.StringVar(&opts.file, "file", opts.file, "local file for upload mode")
+	fs.StringVar(&opts.password, "password", opts.password, "login password for exec or upload mode")
 	fs.DurationVar(&opts.poke, "poke-interval", opts.poke, "interval for sending carriage returns in wait mode; 0 disables")
+	fs.StringVar(&opts.remote, "remote", opts.remote, "remote destination path for upload mode")
 	fs.DurationVar(&opts.timeout, "timeout", opts.timeout, "wait/login timeout")
-	fs.StringVar(&opts.user, "user", opts.user, "login user for exec mode")
+	fs.StringVar(&opts.user, "user", opts.user, "login user for exec or upload mode")
 	fs.BoolVar(&opts.verbose, "verbose", opts.verbose, "mirror login traffic during exec")
 	fs.StringVar(&opts.waitMarker, "wait-marker", opts.waitMarker, "text to wait for in wait mode")
 	return fs
@@ -223,6 +252,7 @@ func usage() string {
   pi_runner [flags] console
   pi_runner [flags] exec --command 'cd /home/admin/droneOS && go test ./...'
   pi_runner [flags] exec 'uname -a'
+  pi_runner [flags] upload --file build/droneOS/drone.bin --remote /home/admin/drone.bin
 
 flags:
   --serial path|auto          default: DRONEOS_SERIAL_DEVICE or auto
@@ -233,6 +263,8 @@ flags:
   --timeout duration          default: DRONEOS_SERIAL_TIMEOUT or 90s
   --wait-marker text          default: DRONEOS_SERIAL_WAIT_MARKER or "login:"; required in wait mode
   --command text              command for exec mode only
+  --file path                 local file for upload mode; default: DRONEOS_UPLOAD_FILE
+  --remote path               remote destination for upload mode; default: DRONEOS_UPLOAD_REMOTE
   --verbose                   mirror login traffic during exec
 
 When more than one USB serial adapter is attached, pass the stable
@@ -459,7 +491,7 @@ func runLoopback(ctx context.Context, port *serial.Port, opts options) error {
 	return nil
 }
 
-func runExec(ctx context.Context, port *serial.Port, opts options) error {
+func runExec(ctx context.Context, port io.ReadWriter, opts options) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, opts.timeout)
 	defer cancel()
 
@@ -472,31 +504,61 @@ func runExec(ctx context.Context, port *serial.Port, opts options) error {
 		mirror:  mirror,
 		scratch: make([]byte, 1024),
 	}
-
 	if err := runner.login(timeoutCtx, opts.user, opts.password); err != nil {
 		return err
 	}
 	runner.reset()
 
-	marker := fmt.Sprintf("__DRONEOS_CMD_%d__", time.Now().UnixNano())
-	command := fmt.Sprintf("sh -lc %s; status=$?; printf '\\n%sEXIT:%%s\\n' \"$status\"", shellQuote(opts.command), marker)
+	token := strconv.FormatInt(time.Now().UnixNano(), 10)
+	readyMarker := "__DRONEOS_EXEC_READY_" + token + "__"
+	failedMarker := "__DRONEOS_EXEC_FAILED_" + token + "__"
+	exitMarker := "__DRONEOS_CMD_" + token + "__"
+	restoreNeeded := false
+	finished := false
+	defer func() {
+		if restoreNeeded && !finished {
+			_ = runner.writeLine("stty echo")
+		}
+	}()
 
+	setup := fmt.Sprintf(
+		"if stty -echo; then printf '\\n%%s%%s\\n' %s %s; else printf '\\n%%s%%s\\n' %s %s; fi",
+		shellQuote("__DRONEOS_EXEC_READY_"),
+		shellQuote(token+"__"),
+		shellQuote("__DRONEOS_EXEC_FAILED_"),
+		shellQuote(token+"__"),
+	)
+	restoreNeeded = true
+	if err := runner.writeLine(setup); err != nil {
+		return fmt.Errorf("disable remote echo: %w", err)
+	}
+	response, err := runner.expect(timeoutCtx, readyMarker, failedMarker)
+	if err != nil {
+		return fmt.Errorf("wait for remote exec setup: %w", err)
+	}
+	if strings.Contains(response, failedMarker) {
+		restoreNeeded = false
+		return errors.New("remote terminal refused to disable echo for exec")
+	}
+	runner.reset()
+
+	command := fmt.Sprintf(
+		"sh -lc %s; status=$?; if ! stty echo; then status=1; fi; printf '\\n%sEXIT:%%s\\n' \"$status\"",
+		shellQuote(opts.command),
+		exitMarker,
+	)
 	if err := runner.writeLine(command); err != nil {
 		return err
 	}
-
-	output, err := runner.expect(timeoutCtx, marker+"EXIT:")
-	if err != nil {
+	if _, err := runner.expect(timeoutCtx, exitMarker+"EXIT:"); err != nil {
 		return fmt.Errorf("wait for command exit marker: %w", err)
 	}
-
-	status, err := runner.waitExitStatus(timeoutCtx, marker)
+	status, err := runner.waitExitStatus(timeoutCtx, exitMarker)
 	if err != nil {
 		return err
 	}
 
-	cleaned := stripCommandEcho(output, command)
-	cleaned = stripAfterMarker(cleaned, marker)
+	cleaned := stripAfterMarker(normalizeSerialOutput(runner.recent.String()), exitMarker)
 	if err := writeFormatted(os.Stdout, "%s", cleaned); err != nil {
 		return fmt.Errorf("write command output: %w", err)
 	}
@@ -505,9 +567,238 @@ func runExec(ctx context.Context, port *serial.Port, opts options) error {
 			return fmt.Errorf("terminate command output: %w", err)
 		}
 	}
-
 	if status != 0 {
 		return fmt.Errorf("remote command exited with status %d", status)
+	}
+	finished = true
+	return nil
+}
+
+func runUpload(ctx context.Context, port io.ReadWriter, opts options) error {
+	token, err := newUploadToken()
+	if err != nil {
+		return err
+	}
+	return runUploadWithToken(ctx, port, opts, token)
+}
+
+func runUploadWithToken(ctx context.Context, port io.ReadWriter, opts options, token string) error {
+	source, err := os.Open(opts.file)
+	if err != nil {
+		return fmt.Errorf("open upload file %s: %w", opts.file, err)
+	}
+	defer source.Close()
+
+	tempPath, err := uploadTempPath(opts.remote, token)
+	if err != nil {
+		return err
+	}
+	timeoutCtx, cancel := context.WithTimeout(ctx, opts.timeout)
+	defer cancel()
+
+	runner := &serialRunner{
+		port:    port,
+		scratch: make([]byte, 1024),
+	}
+	if err := runner.login(timeoutCtx, opts.user, opts.password); err != nil {
+		return err
+	}
+	runner.reset()
+
+	readyMarker := "__DRONEOS_UPLOAD_READY_" + token + "__"
+	failedMarker := "__DRONEOS_UPLOAD_FAILED_" + token + "__"
+	exitMarker := "__DRONEOS_UPLOAD_" + token + "__"
+	delimiter := "__DRONEOS_UPLOAD_DATA_" + token + "__"
+	lineWriter := &base64LineWriter{destination: serialWriter{runner: runner}}
+	heredocOpen := false
+	restoreNeeded := false
+	finished := false
+	defer func() {
+		if finished {
+			return
+		}
+		if heredocOpen {
+			_ = lineWriter.Close()
+			_ = runner.writeLine(delimiter)
+		}
+		if restoreNeeded {
+			_ = runner.writeLine(uploadCleanupCommand(tempPath))
+		}
+	}()
+
+	setup := fmt.Sprintf(
+		"if stty -echo; then printf '\\n%%s%%s\\n' %s %s; else printf '\\n%%s%%s\\n' %s %s; fi",
+		shellQuote("__DRONEOS_UPLOAD_READY_"),
+		shellQuote(token+"__"),
+		shellQuote("__DRONEOS_UPLOAD_FAILED_"),
+		shellQuote(token+"__"),
+	)
+	restoreNeeded = true
+	if err := runner.writeLine(setup); err != nil {
+		return fmt.Errorf("disable remote echo: %w", err)
+	}
+
+	response, err := runner.expect(timeoutCtx, readyMarker, failedMarker)
+	if err != nil {
+		return fmt.Errorf("wait for remote upload setup: %w", err)
+	}
+	if strings.Contains(response, failedMarker) {
+		restoreNeeded = false
+		return errors.New("remote terminal refused to disable echo for upload")
+	}
+	runner.reset()
+
+	heredocOpen = true
+	header := fmt.Sprintf("base64 -d > %s <<%s", shellQuote(tempPath), shellQuote(delimiter))
+	if err := runner.writeLine(header); err != nil {
+		return fmt.Errorf("begin remote upload: %w", err)
+	}
+
+	digest, err := streamBase64Upload(source, lineWriter)
+	if err != nil {
+		return fmt.Errorf("stream upload file: %w", err)
+	}
+	if err := runner.writeLine(delimiter); err != nil {
+		return fmt.Errorf("finish upload payload: %w", err)
+	}
+	heredocOpen = false
+
+	finish := uploadFinishCommand(tempPath, opts.remote, hex.EncodeToString(digest), exitMarker)
+	if err := runner.writeLine(finish); err != nil {
+		return fmt.Errorf("verify uploaded file: %w", err)
+	}
+	if _, err := runner.expect(timeoutCtx, exitMarker+"EXIT:"); err != nil {
+		return fmt.Errorf("wait for upload exit marker: %w", err)
+	}
+	status, err := runner.waitExitStatus(timeoutCtx, exitMarker)
+	if err != nil {
+		return err
+	}
+	if status != 0 {
+		return fmt.Errorf("remote upload failed with status %d", status)
+	}
+	finished = true
+	return nil
+}
+
+func newUploadToken() (string, error) {
+	value := make([]byte, 16)
+	if _, err := rand.Read(value); err != nil {
+		return "", fmt.Errorf("generate upload token: %w", err)
+	}
+	return hex.EncodeToString(value), nil
+}
+
+func uploadTempPath(remote, token string) (string, error) {
+	if remote == "" {
+		return "", errors.New("upload mode requires a remote destination path")
+	}
+	if strings.IndexByte(remote, 0) >= 0 {
+		return "", errors.New("remote destination path contains a null byte")
+	}
+	if strings.HasSuffix(remote, "/") || filepath.Base(remote) == "." || filepath.Base(remote) == ".." {
+		return "", fmt.Errorf("remote destination must name a file: %s", remote)
+	}
+	return remote + ".droneos-upload-" + token + ".tmp", nil
+}
+
+func uploadFinishCommand(tempPath, remote, digest, marker string) string {
+	quotedTemp := shellQuote(tempPath)
+	return fmt.Sprintf(
+		`if actual=$(sha256sum -- %s) && [ "${actual%%%% *}" = %s ] && chmod 0755 -- %s && mv -f -- %s %s; then status=0; else rm -f -- %s; status=1; fi; if ! stty echo; then status=1; fi; printf '\n%sEXIT:%%s\n' "$status"`,
+		quotedTemp,
+		shellQuote(digest),
+		quotedTemp,
+		quotedTemp,
+		shellQuote(remote),
+		quotedTemp,
+		marker,
+	)
+}
+
+func uploadCleanupCommand(tempPath string) string {
+	return fmt.Sprintf("rm -f -- %s; stty echo", shellQuote(tempPath))
+}
+
+func streamBase64Upload(source io.Reader, lines *base64LineWriter) ([]byte, error) {
+	digest := sha256.New()
+	encoded := base64.NewEncoder(base64.StdEncoding, lines)
+	_, copyErr := io.Copy(encoded, io.TeeReader(source, digest))
+	closeErr := encoded.Close()
+	lineErr := lines.Close()
+	if copyErr != nil {
+		return nil, copyErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	if lineErr != nil {
+		return nil, lineErr
+	}
+	return digest.Sum(nil), nil
+}
+
+type serialWriter struct {
+	runner *serialRunner
+}
+
+func (w serialWriter) Write(data []byte) (int, error) {
+	return w.runner.write(data)
+}
+
+type base64LineWriter struct {
+	destination io.Writer
+	line        [76]byte
+	length      int
+}
+
+func (w *base64LineWriter) Write(data []byte) (int, error) {
+	consumed := 0
+	for len(data) > 0 {
+		n := copy(w.line[w.length:], data)
+		w.length += n
+		consumed += n
+		data = data[n:]
+		if w.length != len(w.line) {
+			continue
+		}
+		if err := writeAll(w.destination, w.line[:]); err != nil {
+			return consumed, err
+		}
+		if err := writeAll(w.destination, []byte{'\r'}); err != nil {
+			return consumed, err
+		}
+		w.length = 0
+	}
+	return consumed, nil
+}
+
+func (w *base64LineWriter) Close() error {
+	if w.length == 0 {
+		return nil
+	}
+	if err := writeAll(w.destination, w.line[:w.length]); err != nil {
+		return err
+	}
+	if err := writeAll(w.destination, []byte{'\r'}); err != nil {
+		return err
+	}
+	w.length = 0
+	return nil
+}
+
+func writeAll(destination io.Writer, data []byte) error {
+	for len(data) > 0 {
+		written, err := destination.Write(data)
+		if written > 0 {
+			data = data[written:]
+		}
+		if err != nil {
+			return err
+		}
+		if written == 0 {
+			return io.ErrShortWrite
+		}
 	}
 	return nil
 }
@@ -562,18 +853,23 @@ func (r *serialRunner) waitExitStatus(ctx context.Context, marker string) (int, 
 	prefix := marker + "EXIT:"
 	for {
 		text := r.recent.String()
-		start := strings.LastIndex(text, prefix)
-		if start >= 0 {
-			start += len(prefix)
+		offset := 0
+		for {
+			start := strings.Index(text[offset:], prefix)
+			if start < 0 {
+				break
+			}
+			start += offset + len(prefix)
 			line := text[start:]
-			if idx := strings.IndexAny(line, "\r\n"); idx >= 0 {
-				line = strings.TrimSpace(line[:idx])
-				status, err := strconv.Atoi(line)
-				if err != nil {
-					return 0, fmt.Errorf("parse command exit status %q: %w", line, err)
-				}
+			end := strings.IndexAny(line, "\r\n")
+			if end < 0 {
+				break
+			}
+			status, err := strconv.Atoi(strings.TrimSpace(line[:end]))
+			if err == nil {
 				return status, nil
 			}
+			offset = start + end + 1
 		}
 
 		select {
@@ -708,24 +1004,33 @@ func (r *serialRunner) writeLine(line string) error {
 	return r.writeRaw(line + "\r")
 }
 
-func (r *serialRunner) writeRaw(value string) error {
-	n, err := r.port.Write([]byte(value))
+func (r *serialRunner) write(data []byte) (int, error) {
+	written, err := r.port.Write(data)
 	if err != nil {
-		return err
+		return written, err
 	}
-	if n != len(value) {
-		return io.ErrShortWrite
+	if written != len(data) {
+		return written, io.ErrShortWrite
 	}
-	return nil
+	return written, nil
+}
+
+func (r *serialRunner) writeRaw(value string) error {
+	_, err := r.write([]byte(value))
+	return err
 }
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
-func stripCommandEcho(output, command string) string {
+func normalizeSerialOutput(output string) string {
 	output = strings.ReplaceAll(output, "\r\n", "\n")
-	output = strings.ReplaceAll(output, "\r", "\n")
+	return strings.ReplaceAll(output, "\r", "\n")
+}
+
+func stripCommandEcho(output, command string) string {
+	output = normalizeSerialOutput(output)
 	if idx := strings.Index(output, command); idx >= 0 {
 		output = output[idx+len(command):]
 	}

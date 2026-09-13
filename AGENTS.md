@@ -62,8 +62,9 @@ This repository is a Go codebase for two cooperating runtimes: a base station an
 - `base.radio` and `drone.radio` map to `config.Radio`:
   - `name`: registered radio driver, currently `SX1262` or empty/`none`.
   - `alwaysUse`: drone radio pings continue even when WiFi is up if true.
-  - `usbId`: empty means GPIO UART mode; `auto`/`scan`/`usb` variants scan USB serial devices; a path uses that char device.
-  - `usbScan`: with empty `usbId`, true also triggers USB serial scan.
+  - `usbId`: empty (with `usbScan` false) selects GPIO UART mode; `auto`/`scan`/`usb` variants scan USB serial devices; a path uses that char device.
+  - `usbScan`: true also triggers USB serial scan.
+  - `uartDevice`: GPIO-UART device only. Empty keeps the `/dev/ttyS0` compatibility default; USB selection through `usbId` or `usbScan` ignores it. The current Waveshare drone bench config explicitly uses `/dev/ttyAMA0`.
   - `pins`: optional pin metadata for GPIO preflight logging/validation.
 - `drone.alwaysUseRadio` exists in the struct but current runtime code reads `drone.radio.alwaysUse`.
 - `drone.gpioLayout` supports `rpi-40` aliases. Pin schemes are `bcm`, `physical`, or `chip`.
@@ -100,14 +101,14 @@ This repository is a Go codebase for two cooperating runtimes: a base station an
 - Do not assume `AutoTransport` is the active main path. It exists in `internal/protocol/transport.go`, but current base/drone flows mostly use `WiFiTransport`, `RadioTransport`, and `ServeRadio` directly.
 - WiFi status is determined by a `ping` request to the base. Controller polling and device-state reports only use WiFi in the current code.
 - `protocol.ServeRadio` decodes a framed request, dispatches through `protocol.FuncMap`, then sends a framed response on the same radio link.
-- `StartDeviceReporter` scans USB sysfs, all GPIO chips, configured sensors, and configured outputs every 10 seconds, but only sends reports when WiFi is connected.
+- `StartDeviceReporter` scans USB sysfs, GPIO `LineInfo` metadata, configured sensors, and configured outputs every 10 seconds, but only sends reports when WiFi is connected. GPIO inventory must never request unowned lines to sample values: closing such requests can reset firmware-configured alternate functions and break UART/WiFi.
 
 ## Hardware Notes
 
 - `internal/drivers/radio/SX1262` has a `//go:build linux` tag.
-- SX1262 GPIO mode uses `/dev/ttyS0` by default and GPIO BCM 22/27 for M0/M1.
-- SX1262 USB mode scans `/dev/serial/by-id`, `/dev/ttyUSB*`, and `/dev/ttyACM*`, then chooses the first sorted valid device.
-- The LoRa driver currently sends a placeholder configuration command in GPIO mode; consult the actual module register map before changing radio parameters.
+- GPIO mode keeps `/dev/ttyS0` as its compatibility default and uses GPIO BCM 22/27 for M0/M1. On the Waveshare bench, `dtoverlay=disable-bt` makes `/dev/ttyAMA0` the Pi primary UART, so the explicit `radio.uartDevice` must select `/dev/ttyAMA0`.
+- SX1262 USB mode scans `/dev/serial/by-id`, `/dev/ttyUSB*`, and `/dev/ttyACM*`, then chooses the first sorted valid device; `uartDevice` has no effect in USB mode.
+- GPIO-mode LoRa startup selects transparent normal mode without persisting radio parameters; physical modules must already have matching settings and compatible mode/interface jumpers.
 - GPIO detection and validation can fail on non-Pi hosts due missing `/dev/gpiochip*`; keep hardware-specific checks optional or isolated in tests.
 - Device detection is partial:
   - MPU-6050 probes I2C `WHO_AM_I`.
@@ -128,24 +129,27 @@ This repository is a Go codebase for two cooperating runtimes: a base station an
 - `build_image.sh` repartitions and formats the target block device. Do not run it casually during verification.
 - `build_image.sh` loads optional project-root `.image.env` before resolving image defaults. The file uses shell syntax and can contain secrets; keep the ignored local file private and start from `.image.env.example`.
 - Production image builds copy the selected optional runtime role file—`.base.env` for base images or `.drone.env` for drone images—into `/opt/droneOS` with restrictive permissions. The selected file remains optional.
-- `sync_pi.sh` transfers `.drone.env` when present for development source sync but excludes `.image.env` and `.base.env` to avoid copying unrelated secrets.
+- `sync_pi.sh` transfers `.drone.env` when present for development source sync but excludes `.image.env` and `.base.env` to avoid copying unrelated secrets. The supported Pi flow cross-builds the drone on the workstation and deploys it through the serial runner's upload mode; source synchronization remains optional when SSH is available, but development images do not preload Go.
 - Alpine image modes:
   - `BUILD_MODE=prod` builds and enables the `droneOS` OpenRC service, disables WiFi by default, and does not add network configuration.
-  - `BUILD_MODE=dev` skips embedding the app binary, disables the `droneOS` service, enables WiFi/SSH, preloads dev APKs, and expects source sync/build on the Pi. Its credentials are for trusted networks only.
-- Dev image package fetch supports host `apk`, then Docker, then Podman via `APK_FETCH_CONTAINER_IMAGE`.
+  - `BUILD_MODE=dev` skips embedding the app binary, disables the `droneOS` service, enables WiFi/SSH, and preloads SSH/rsync/network tools including Alpine's OpenRC service package for `sshd` and `doas` for the wheel-group development user. WiFi startup disables `wlan0` power saving for stable SSH sessions. Its credentials are for trusted networks only.
+- Dev image package fetch supports host `apk`, then Docker, then Podman via `APK_FETCH_CONTAINER_IMAGE`; do not add Go because the Pi root tmpfs cannot reliably install it, and do not add packages such as `linux-firmware-brcm` or `wireless-regdb` that write `/lib/firmware` because diskless Alpine supplies that read-only tree from the modloop. The stock Alpine modloop or complete RT kernel bundle must carry Pi Zero 2 W `brcmfmac` firmware and regulatory data.
 - `ENABLE_UART_CONSOLE` defaults to `0` for production images and `1` for development images. When enabled in either mode, `UART_CONSOLE_TTY`, every space-separated `UART_CONSOLE_EXTRA_TTYS` value, and `UART_CONSOLE_BAUD` must be valid.
-- Dev image UART console defaults are `UART_CONSOLE_TTY=ttyAMA0`, `UART_CONSOLE_EXTRA_TTYS=ttyS0`, and `UART_CONSOLE_BAUD=115200`.
-- `UART_CONSOLE_EXTRA_TTYS` is a space-separated fallback list. It appends extra `console=<tty>,<baud>` tokens and adds extra serial gettys in the dev overlay; set it to an empty value only when another UART device must own that TTY during development.
+- Dev image UART-console defaults are `UART_CONSOLE_TTY=ttyAMA0`, `UART_CONSOLE_EXTRA_TTYS=""`, and `UART_CONSOLE_BAUD=115200`. With the default `dtoverlay=disable-bt`, `/dev/ttyAMA0` is the Pi primary UART; do not add extra console/getty TTYs for this bench.
+- Waveshare HAT selector topology is fixed: **A** connects workstation host USB to the LoRa module (base radio); **B** connects the Pi primary UART to the LoRa module (drone run); **C** connects the host CP2102 USB to the Pi primary UART (console and provisioning). Put both selector caps on the same selected row and power the hardware off before moving either cap. C and B share `/dev/ttyAMA0`, so a serial console cannot remain connected during a radio run.
+- Stage the persistent drone binary, explicit `/dev/ttyAMA0` GPIO-radio config, log destination, and a boot-time service/start path while selector C is fitted; on Alpine development images, include the staged files in LBU and commit before rebooting. Then power off, select B with both caps, boot, and use a base on selector A. For recovery or further serial provisioning, power off and restore both caps to C before connecting the Pi console.
+- `UART_CONSOLE_EXTRA_TTYS` is a space-separated explicit opt-in list. It appends extra `console=<tty>,<baud>` tokens and adds extra serial gettys in the dev overlay; it must remain empty on the shared-UART Waveshare bench.
 - `write_boot_config` must preserve multiple `console=` tokens; use token-level appending for UART console entries.
 - `configs/config-kernel8.txt` is reference boot config, but `build_image.sh` writes boot settings into the extracted Alpine boot partition.
 - `ENABLE_REALTIME_KERNEL` defaults to `1` for `kernel8 drone` images and `0` for base images. RT builds currently support only `aarch64`; the builder validates `CONFIG_PREEMPT_RT=y` and installs kernel, initramfs, modloop/modules, DTBs, and overlays as one bundle.
 - `build_rt_kernel.sh` must keep using the Alpine release's `linux-rpi` aport and `update-kernel`; do not restore the historical Raspberry Pi OS kernel copier or external 6.6 RT patch flow. Linux 6.12 and newer contain PREEMPT_RT in mainline.
 - For dev Pis, use `sync_pi.sh <host> [remote-dir]`; override with `DRONEOS_PI_USER`, `DRONEOS_PI_PORT`, `DRONEOS_PI_DIR`, and `DRONEOS_RSYNC_DELETE`.
-- `pi_runner.sh` supports `list`, `console`, `loopback`, `wait`, and `exec`. Automatic discovery sorts `/dev/serial/by-id` before `/dev/ttyUSB*` and `/dev/ttyACM*`, resolves and deduplicates aliases by device target, and keeps the stable by-id name as the canonical candidate. One canonical candidate is selected automatically; distinct devices require `--serial` or `DRONEOS_SERIAL_DEVICE`.
+- `pi_runner.sh` supports `list`, `console`, `loopback`, `wait`, `exec`, and `upload`. Automatic discovery sorts `/dev/serial/by-id` before `/dev/ttyUSB*` and `/dev/ttyACM*`, resolves and deduplicates aliases by device target, and keeps the stable by-id name as the canonical candidate. One canonical candidate is selected automatically; distinct devices require `--serial` or `DRONEOS_SERIAL_DEVICE`. On the two-adapter bench, both CP2102 devices report serial `0001`, so by-id is ambiguous: while both caps are on C, explicitly use the verified `/dev/ttyUSB0` Pi-console adapter; selector A's base radio remains at its configured `/dev/serial/by-path` path. Recheck after reconnecting hardware.
 - Interactive `pi_runner.sh console` places terminal stdin in raw mode, transparently forwards terminal replies such as ANSI cursor-position reports, restores the workstation terminal on every exit path, and keeps `Ctrl-C` as the local exit command. Piped and other non-TTY input remains unchanged.
 - `pi_runner.sh loopback` writes a marker and waits for it to echo back; use it with the adapter TX and RX pins temporarily shorted to prove host-side serial input/output before debugging Pi wiring.
 - `pi_runner.sh wait` defaults to 115200 baud and sends carriage returns every two seconds to rediscover a getty prompt; override with `DRONEOS_SERIAL_BAUD`, `DRONEOS_SERIAL_POKE_INTERVAL`, and `DRONEOS_SERIAL_TIMEOUT`.
 - `pi_runner.sh exec` logs in through the serial getty with `DRONEOS_PI_USER` and `DRONEOS_PI_PASSWORD`, then runs a shell command. It proves serial input/output and is the automation hook for agent-driven Pi checks when SSH is unavailable.
+- `pi_runner.sh upload` logs in with the same credentials and requires local and remote paths from `--file <local-binary>` plus `--remote <remote-path>` or `DRONEOS_UPLOAD_FILE` plus `DRONEOS_UPLOAD_REMOTE`; explicit path flags are rejected in every other mode and may precede or follow `upload`. It streams a base64 payload to a safely quoted remote temporary file with terminal echo disabled, verifies local and remote SHA-256 values, atomically installs and chmods the destination to `0755` only after a match, restores echo on every reachable exit path, and removes failed temporary files. Use a longer shared `--timeout` or `DRONEOS_SERIAL_TIMEOUT` for C-selector transfers and never send through selector A's base-radio adapter.
 
 ## Verification
 

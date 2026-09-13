@@ -40,9 +40,10 @@ environment:
   DISABLE_WIFI=1             add Raspberry Pi disable-wifi overlay (default: prod=1, dev=0)
   DISABLE_BLUETOOTH=1        add Raspberry Pi disable-bt overlay (default: 1)
   ENABLE_UART_CONSOLE=1      add serial console (default: prod=0, dev=1)
-  UART_CONSOLE_TTY=ttyAMA0   serial console device for GPIO14/GPIO15 UART
-  UART_CONSOLE_EXTRA_TTYS=ttyS0
-                             extra serial console TTYs (default: dev=ttyS0, prod empty)
+                             selector C only; it shares the Pi primary UART with selector B
+  UART_CONSOLE_TTY=ttyAMA0   Pi primary UART with disable-bt; default dev console
+  UART_CONSOLE_EXTRA_TTYS=   optional extra serial console TTYs (default: empty)
+                             leave empty for this bench; selector changes require power off
   UART_CONSOLE_BAUD=115200   serial console baud rate
   ENABLE_REALTIME_KERNEL=1  install PREEMPT_RT kernel (default: drone=1, base=0)
   RT_KERNEL_BUNDLE=/path   optional prebuilt realtime kernel media bundle
@@ -357,7 +358,7 @@ install_realtime_kernel() {
 fetch_dev_apks() {
   local main_repo="${ALPINE_MIRROR}/${ALPINE_BRANCH}/main"
   local community_repo="${ALPINE_MIRROR}/${ALPINE_BRANCH}/community"
-  local packages=(openssl openssh rsync go iw wireless-regdb)
+  local packages=(openssl openssh openssh-server-common-openrc rsync iw doas)
   local container_image="${APK_FETCH_CONTAINER_IMAGE:-alpine:latest}"
   local container_apk_script
 
@@ -478,7 +479,6 @@ PasswordAuthentication yes
 PubkeyAuthentication yes
 PermitRootLogin no
 ChallengeResponseAuthentication no
-UsePAM no
 Subsystem sftp /usr/lib/ssh/sftp-server
 EOF
   cp "$staging/etc/ssh/sshd_config" "$staging/etc/droneos/sshd_config"
@@ -626,9 +626,25 @@ configure_dev_user() {
     chown -R "${DEV_USER_NAME}:${DEV_USER_NAME}" "$DEV_PROJECT_DIR"
 }
 
+normalize_lora_device_access() {
+    local device
+
+    for device in /dev/gpiochip*; do
+        [ -c "$device" ] || continue
+        chgrp gpio "$device" 2>/dev/null || true
+        chmod g+rw "$device" 2>/dev/null || true
+    done
+    for device in /dev/ttyS* /dev/ttyAMA*; do
+        [ -c "$device" ] || continue
+        chgrp dialout "$device" 2>/dev/null || true
+        chmod g+rw "$device" 2>/dev/null || true
+    done
+}
+
 start_dev_network() {
     iw reg set "$WIFI_COUNTRY" >/dev/null 2>&1 || true
     rc-service networking restart || true
+    iw dev wlan0 set power_save off >/dev/null 2>&1 || true
 
     if [ "$DEV_WIFI_MODE" = "ap" ]; then
         rc-service dnsmasq restart || true
@@ -683,6 +699,7 @@ start() {
         configure_uart_console
     fi
     configure_dev_user || return 1
+    normalize_lora_device_access
     install_dev_packages || return 1
     restore_dev_configs || return 1
     start_dev_network
@@ -705,6 +722,7 @@ create_openrc_overlay() {
     "$staging/etc/conf.d" \
     "$staging/etc/droneos" \
     "$staging/etc/hostapd" \
+    "$staging/etc/doas.d" \
     "$staging/etc/init.d" \
     "$staging/etc/modprobe.d" \
     "$staging/etc/network" \
@@ -715,6 +733,19 @@ create_openrc_overlay() {
 
   printf '%s\n' "$HOSTNAME" > "$staging/etc/hostname"
   printf 'i2c-dev\nspidev\n' > "$staging/etc/modules"
+  printf 'permit persist :wheel\n' > "$staging/etc/doas.d/doas.conf"
+  chmod 0600 "$staging/etc/doas.d/doas.conf"
+  cat > "$staging/etc/.default_boot_services" <<'EOF'
+devfs
+dmesg
+mdev
+hwdrivers
+modloop
+modules
+hostname
+bootmisc
+EOF
+
   if [[ "$DISABLE_WIFI" -eq 1 ]]; then
     printf 'blacklist brcmfmac\nblacklist brcmutil\n' > "$staging/etc/modprobe.d/droneos-no-wifi.conf"
   fi
@@ -947,11 +978,9 @@ if [[ -z "${ENABLE_UART_CONSOLE+x}" ]]; then
 fi
 UART_CONSOLE_TTY=${UART_CONSOLE_TTY:-ttyAMA0}
 if [[ -z "${UART_CONSOLE_EXTRA_TTYS+x}" ]]; then
-  if [[ "$BUILD_MODE" == "dev" && "$ENABLE_UART_CONSOLE" -eq 1 ]]; then
-    UART_CONSOLE_EXTRA_TTYS=ttyS0
-  else
-    UART_CONSOLE_EXTRA_TTYS=""
-  fi
+  # With disable-bt, ttyAMA0 is the Pi primary UART: selector C exposes it to
+  # the provisioning host and selector B routes it to LoRa. Keep extra consoles empty.
+  UART_CONSOLE_EXTRA_TTYS=""
 fi
 UART_CONSOLE_BAUD=${UART_CONSOLE_BAUD:-115200}
 if [[ -z "${ENABLE_REALTIME_KERNEL+x}" ]]; then

@@ -15,6 +15,7 @@ build/
 *.so
 *.bin
 
+pi_runner
 droneOS_base
 base.bin
 droneOS_drone

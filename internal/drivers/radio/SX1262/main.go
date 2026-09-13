@@ -5,8 +5,6 @@ package SX1262
 
 import (
 	"context"
-	"droneOS/internal/config"
-	"droneOS/internal/protocol"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -15,6 +13,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"droneOS/internal/config"
+	"droneOS/internal/protocol"
 
 	"github.com/rs/zerolog"
 	"github.com/tarm/serial"
@@ -29,14 +30,19 @@ const (
 	// Serial configuration
 	SERIAL_DEVICE = "/dev/ttyS0" // Pi's hardware UART (GPIO 14 TX, GPIO 15 RX)
 	BAUD_RATE     = 9600
+
+	maxFramePayloadSize = 64 * 1024
+	maxFrameSize        = 4 + maxFramePayloadSize
 )
 
 type LoRaHAT struct {
-	serial *serial.Port
-	m0     *gpiocdev.Line
-	m1     *gpiocdev.Line
-	log    zerolog.Logger
-	mode   string // "config", "tx", "rx"
+	serial       io.ReadWriteCloser
+	m0           *gpiocdev.Line
+	m1           *gpiocdev.Line
+	log          zerolog.Logger
+	receiveBuf   [maxFrameSize]byte
+	receiveStart int
+	receiveEnd   int
 }
 
 func NewLoRaHAT(ctx context.Context, serialDevice string, useGPIO bool) (*LoRaHAT, error) {
@@ -82,8 +88,10 @@ func NewLoRaHAT(ctx context.Context, serialDevice string, useGPIO bool) (*LoRaHA
 		if m1 != nil {
 			_ = m1.Close()
 		}
-		logger.Error().Err(err).Str("device", serialDevice).Msg("Failed to open serial port")
-		return nil, err
+		mode := radioMode(useGPIO)
+		openErr := fmt.Errorf("open LoRa serial port %q in %s mode: %w", serialDevice, mode, err)
+		logger.Error().Err(openErr).Str("device", serialDevice).Str("mode", mode).Msg("Failed to open serial port")
+		return nil, openErr
 	}
 
 	hat := &LoRaHAT{
@@ -93,54 +101,23 @@ func NewLoRaHAT(ctx context.Context, serialDevice string, useGPIO bool) (*LoRaHA
 		log:    *logger,
 	}
 
-	// Only configure via software if using GPIO mode
-	// In USB mode, the physical jumpers control M0/M1
+	// In USB mode, the physical jumpers control M0/M1.
 	if useGPIO {
-		logger.Info().Msg("Configuring LoRa in GPIO mode")
-
-		// Set to configuration mode (M0=LOW, M1=HIGH)
-		hat.setMode("config")
-
-		// Configure LoRa parameters
-		if err := hat.configureLoRa(); err != nil {
-			hat.Close()
-			return nil, err
-		}
-
-		// Set to transmission mode (M0=LOW, M1=LOW)
-		hat.setMode("tx")
-
-		// Give extra time for mode to settle
-		time.Sleep(200 * time.Millisecond)
-
-		logger.Info().Msg("LoRa configured in GPIO mode: M0=LOW, M1=LOW (TX/RX mode)")
+		hat.setTransparentMode()
+		logger.Info().Msg("LoRa GPIO mode ready: M0=LOW, M1=LOW (transparent transmission mode)")
 	} else {
 		logger.Info().Msg("LoRa in USB mode - ensure jumpers are set: UART=A, M0=GND, M1=GND for transmission")
-		// In USB mode, assume jumpers are physically set correctly
-		// No software configuration needed
 	}
 
 	logger.Info().Msg("LoRa HAT initialized successfully")
 	return hat, nil
 }
 
-func (h *LoRaHAT) setMode(mode string) {
-	h.mode = mode
-	switch mode {
-	case "config":
-		h.setLine(h.m0, 0)
-		h.setLine(h.m1, 1)
-	case "tx", "rx":
-		h.setLine(h.m0, 0)
-		h.setLine(h.m1, 0)
-	default:
-		h.log.Warn().Str("mode", mode).Msg("Unknown mode, defaulting to TX")
-		h.setLine(h.m0, 0)
-		h.setLine(h.m1, 0)
-	}
-
+func (h *LoRaHAT) setTransparentMode() {
+	h.setLine(h.m0, 0)
+	h.setLine(h.m1, 0)
 	time.Sleep(100 * time.Millisecond)
-	h.log.Debug().Str("mode", mode).Msg("Mode set")
+	h.log.Debug().Msg("LoRa transparent transmission mode set")
 }
 
 func (h *LoRaHAT) setLine(line *gpiocdev.Line, value int) {
@@ -149,60 +126,6 @@ func (h *LoRaHAT) setLine(line *gpiocdev.Line, value int) {
 	}
 	if err := line.SetValue(value); err != nil {
 		h.log.Error().Err(err).Msg("Failed to set GPIO line")
-	}
-}
-
-func (h *LoRaHAT) configureLoRa() error {
-	h.log.Info().Msg("Configuring LoRa parameters")
-
-	// Example configuration bytes (adapt from Waveshare documentation)
-	// This is a placeholder - refer to your HAT's register map
-	configCmd := []byte{
-		0xC0, 0x00, 0x09, // Write to register 0x00, 9 bytes
-		0x00, 0x00, // Address 0x0000
-		0x00,       // Network ID 0
-		0x17,       // Channel 23 (915 MHz)
-		0x04,       // Air data rate 4.8K
-		0x0D,       // Power 13 dBm (~30mA TX current, was 0x16 = 22 dBm ~140mA)
-		0x01, 0x04, // Other parameters
-	}
-
-	_, err := h.serial.Write(configCmd)
-	if err != nil {
-		h.log.Error().Err(err).
-			Msg("Failed to send configuration command")
-		return err
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	// Drain the input buffer to discard any echo or config response
-	h.drainSerialBuffer()
-
-	h.log.Info().
-		Msg("LoRa configuration sent")
-	return nil
-}
-
-// drainSerialBuffer reads and discards all available data from the serial port
-func (h *LoRaHAT) drainSerialBuffer() {
-	buf := make([]byte, 256)
-	totalDiscarded := 0
-
-	// Read until no more data is immediately available
-	// Limit iterations to prevent tight loop on USB devices
-	for i := 0; i < 3; i++ {
-		n, err := h.serial.Read(buf)
-		if err != nil || n == 0 {
-			break
-		}
-		totalDiscarded += n
-		// Longer sleep for USB devices to avoid overwhelming the kernel
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	if totalDiscarded > 0 {
-		h.log.Debug().Int("bytes", totalDiscarded).Msg("Drained serial buffer")
 	}
 }
 
@@ -222,56 +145,60 @@ func (h *LoRaHAT) Send(data []byte) error {
 }
 
 func (h *LoRaHAT) Receive() ([]byte, error) {
-	// Try to read the 4-byte length prefix
-	lengthBytes := make([]byte, 4)
-	n, err := h.serial.Read(lengthBytes)
-
-	// Handle timeout or no data (common, don't log)
-	if err != nil || n == 0 {
-		// Add small delay to prevent tight polling loop
-		time.Sleep(10 * time.Millisecond)
-		return []byte{}, nil
+	if frame := h.nextFrame(); frame != nil {
+		return frame, nil
 	}
 
-	// If we got partial length bytes, try to complete the read
-	if n < 4 {
-		remaining := lengthBytes[n:]
-		n2, err := io.ReadFull(h.serial, remaining)
-		if err != nil {
-			// Don't log every incomplete read - too noisy
-			h.drainSerialBuffer()
-			return []byte{}, nil
+	h.compactReceiveBuffer()
+	n, err := h.serial.Read(h.receiveBuf[h.receiveEnd:])
+	if n > 0 {
+		h.receiveEnd += n
+	}
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, nil
+	}
+
+	return h.nextFrame(), nil
+}
+
+func (h *LoRaHAT) nextFrame() []byte {
+	for h.receiveEnd-h.receiveStart >= 4 {
+		payloadLength := binary.BigEndian.Uint32(h.receiveBuf[h.receiveStart : h.receiveStart+4])
+		if payloadLength == 0 || payloadLength > maxFramePayloadSize {
+			h.receiveStart++
+			continue
 		}
-		n += n2
+
+		frameLength := 4 + int(payloadLength)
+		if h.receiveEnd-h.receiveStart < frameLength {
+			return nil
+		}
+
+		frame := make([]byte, frameLength)
+		copy(frame, h.receiveBuf[h.receiveStart:h.receiveStart+frameLength])
+		h.receiveStart += frameLength
+		if h.receiveStart == h.receiveEnd {
+			h.receiveStart = 0
+			h.receiveEnd = 0
+		}
+
+		h.log.Debug().Int("length", frameLength).Msg("LoRa packet received")
+		return frame
 	}
 
-	// Parse the length
-	length := binary.BigEndian.Uint32(lengthBytes)
-	if length == 0 || length > 64*1024 {
-		// Only log invalid lengths occasionally to avoid log spam
-		h.drainSerialBuffer()
-		return []byte{}, nil
+	return nil
+}
+
+func (h *LoRaHAT) compactReceiveBuffer() {
+	if h.receiveStart == 0 {
+		return
 	}
-
-	// Read the complete payload
-	payload := make([]byte, length)
-	if _, err := io.ReadFull(h.serial, payload); err != nil {
-		// Don't log - this can happen during normal operation
-		h.drainSerialBuffer()
-		return []byte{}, nil
-	}
-
-	// Return the complete frame (length prefix + payload)
-	frame := make([]byte, 4+length)
-	copy(frame[:4], lengthBytes)
-	copy(frame[4:], payload)
-
-	// Only log successful receives at debug level
-	h.log.Debug().
-		Int("length", len(frame)).
-		Msg("LoRa packet received")
-
-	return frame, nil
+	copy(h.receiveBuf[:], h.receiveBuf[h.receiveStart:h.receiveEnd])
+	h.receiveEnd -= h.receiveStart
+	h.receiveStart = 0
 }
 
 func (h *LoRaHAT) Close() {
@@ -321,17 +248,34 @@ func resolveSerialDevice(cfg *config.Radio) (string, bool, error) {
 		}
 		return dev, false, nil
 	}
-	if usbID == "" {
+	if usbID != "" {
+		dev, err := validateSerialDevice(usbID)
+		return dev, false, err
+	}
+	uartDevice := strings.TrimSpace(cfg.UartDevice)
+	if uartDevice == "" {
 		return SERIAL_DEVICE, true, nil
 	}
-	info, err := os.Stat(usbID)
+	dev, err := validateSerialDevice(uartDevice)
+	return dev, true, err
+}
+
+func validateSerialDevice(device string) (string, error) {
+	info, err := os.Stat(device)
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
 	if info.Mode()&os.ModeCharDevice == 0 {
-		return "", false, fmt.Errorf("%s is not a character device", usbID)
+		return "", fmt.Errorf("%s is not a character device", device)
 	}
-	return usbID, false, nil
+	return device, nil
+}
+
+func radioMode(useGPIO bool) string {
+	if useGPIO {
+		return "GPIO UART"
+	}
+	return "USB"
 }
 
 func isAutoUSB(value string) bool {

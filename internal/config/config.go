@@ -35,11 +35,12 @@ type Device struct {
 }
 
 type Radio struct {
-	Name      string `yaml:"name"`
-	AlwaysUse bool   `yaml:"alwaysUse"`
-	Pins      []Pin  `yaml:"pins,omitempty"`
-	UsbId     string `yaml:"usbId"`
-	UsbScan   bool   `yaml:"usbScan,omitempty"`
+	Name       string `yaml:"name"`
+	AlwaysUse  bool   `yaml:"alwaysUse"`
+	Pins       []Pin  `yaml:"pins,omitempty"`
+	UsbId      string `yaml:"usbId"`
+	UsbScan    bool   `yaml:"usbScan,omitempty"`
+	UartDevice string `yaml:"uartDevice,omitempty"`
 }
 
 type DroneConfig struct {

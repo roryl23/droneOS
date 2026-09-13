@@ -6,18 +6,19 @@ base:
   radio:
     name: SX1262
     alwaysUse: False
-    usbId: /dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0  # Base station uses USB mode
+    usbId: /dev/serial/by-path/pci-0000:00:14.0-usb-0:5.3:1.0-port0  # Base HAT USB path on this bench
     usbScan: false
 drone:
   id: 1
   gpioLayout: rpi-40
-  enableLogging: false
+  enableLogging: true
   logLevel: debug
   radio:
     name: SX1262
     alwaysUse: True  # Always use radio for testing, even when WiFi connected
     usbId: ""  # Empty = use GPIO mode with hardware UART
     usbScan: false
+    uartDevice: /dev/ttyAMA0  # Waveshare selector B: Pi primary UART to LoRa
   sensors: []
 #    - name: frienda_obstacle_431S
 #      pins:

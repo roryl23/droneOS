@@ -500,13 +500,67 @@ func main() {
 				if wifiConnected.Load() && !settings.Drone.Radio.AlwaysUse {
 					continue
 				}
-				_, err := radioTransport.Send(ctx, protocol.Message{
+				ping := protocol.Message{
 					ID:  settings.Drone.ID,
 					Cmd: "ping",
-				})
-				if err != nil {
-					log.Debug().Err(err).Msg("radio ping failed")
 				}
+				response, err := radioTransport.Send(ctx, ping)
+				if err != nil {
+					log.Error().
+						Err(err).
+						Str("transport", "radio").
+						Int("id", ping.ID).
+						Str("command", ping.Cmd).
+						Msg("radio ping failed")
+					continue
+				}
+				if response.ID != ping.ID || response.Cmd != ping.Cmd || response.Data != "pong" {
+					log.Error().
+						Str("transport", "radio").
+						Int("id", ping.ID).
+						Str("command", ping.Cmd).
+						Int("response_id", response.ID).
+						Str("response_command", response.Cmd).
+						Str("response_data", response.Data).
+						Msg("radio ping response validation failed")
+					continue
+				}
+				confirmation := protocol.Message{
+					ID:   ping.ID,
+					Cmd:  "debug_log",
+					Data: "radio ping pong confirmed",
+				}
+				confirmationResponse, err := radioTransport.Send(ctx, confirmation)
+				if err != nil {
+					log.Error().
+						Err(err).
+						Str("transport", "radio").
+						Int("id", confirmation.ID).
+						Str("command", confirmation.Cmd).
+						Str("request_data", confirmation.Data).
+						Msg("radio ping pong confirmation failed")
+					continue
+				}
+				if confirmationResponse.ID != confirmation.ID ||
+					confirmationResponse.Cmd != confirmation.Cmd ||
+					confirmationResponse.Data != "ok" {
+					log.Error().
+						Str("transport", "radio").
+						Int("id", confirmation.ID).
+						Str("command", confirmation.Cmd).
+						Str("request_data", confirmation.Data).
+						Int("response_id", confirmationResponse.ID).
+						Str("response_command", confirmationResponse.Cmd).
+						Str("response_data", confirmationResponse.Data).
+						Msg("radio ping pong confirmation response validation failed")
+					continue
+				}
+				log.Debug().
+					Str("transport", "radio").
+					Int("id", ping.ID).
+					Str("command", ping.Cmd).
+					Str("response_data", response.Data).
+					Msg("radio ping round trip confirmed")
 			}
 		}()
 	}
